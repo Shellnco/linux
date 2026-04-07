@@ -15,11 +15,11 @@ static enum scx_test_status setup(void **ctx)
 {
 	struct enq_last_no_enq_fails *skel;
 
-	skel = enq_last_no_enq_fails__open_and_load();
-	if (!skel) {
-		SCX_ERR("Failed to open and load skel");
-		return SCX_TEST_FAIL;
-	}
+	skel = enq_last_no_enq_fails__open();
+	SCX_FAIL_IF(!skel, "Failed to open");
+	SCX_ENUM_INIT(skel);
+	SCX_FAIL_IF(enq_last_no_enq_fails__load(skel), "Failed to load skel");
+
 	*ctx = skel;
 
 	return SCX_TEST_PASS;
@@ -31,8 +31,12 @@ static enum scx_test_status run(void *ctx)
 	struct bpf_link *link;
 
 	link = bpf_map__attach_struct_ops(skel->maps.enq_last_no_enq_fails_ops);
-	if (link) {
-		SCX_ERR("Incorrectly succeeded in to attaching scheduler");
+	if (!link) {
+		SCX_ERR("Incorrectly failed at attaching scheduler");
+		return SCX_TEST_FAIL;
+	}
+	if (!skel->bss->exit_kind) {
+		SCX_ERR("Incorrectly stayed loaded");
 		return SCX_TEST_FAIL;
 	}
 
@@ -50,7 +54,7 @@ static void cleanup(void *ctx)
 
 struct scx_test enq_last_no_enq_fails = {
 	.name = "enq_last_no_enq_fails",
-	.description = "Verify we fail to load a scheduler if we specify "
+	.description = "Verify we eject a scheduler if we specify "
 		       "the SCX_OPS_ENQ_LAST flag without defining "
 		       "ops.enqueue()",
 	.setup = setup,

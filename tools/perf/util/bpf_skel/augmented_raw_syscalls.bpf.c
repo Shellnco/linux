@@ -7,7 +7,6 @@
  */
 
 #include "vmlinux.h"
-#include "../trace_augment.h"
 
 #include <bpf/bpf_helpers.h>
 #include <linux/limits.h>
@@ -27,6 +26,8 @@
 
 #define MAX_CPUS  4096
 
+#define TRACE_AUG_MAX_BUF 32 /* for buffer augmentation in perf trace */
+
 /* bpf-output associated map */
 struct __augmented_syscalls__ {
 	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -44,7 +45,7 @@ struct syscalls_sys_enter {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__type(key, __u32);
 	__type(value, __u32);
-	__uint(max_entries, 512);
+	__uint(max_entries, 1024);
 } syscalls_sys_enter SEC(".maps");
 
 /*
@@ -56,7 +57,7 @@ struct syscalls_sys_exit {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__type(key, __u32);
 	__type(value, __u32);
-	__uint(max_entries, 512);
+	__uint(max_entries, 1024);
 } syscalls_sys_exit SEC(".maps");
 
 struct syscall_enter_args {
@@ -288,6 +289,10 @@ int sys_enter_rename(struct syscall_enter_args *args)
 	augmented_args->arg.size = PERF_ALIGN(oldpath_len + 1, sizeof(u64));
 	len += augmented_args->arg.size;
 
+	/* Every read from userspace is limited to value size */
+	if (augmented_args->arg.size > sizeof(augmented_args->arg.value))
+		return 1; /* Failure: don't filter */
+
 	struct augmented_arg *arg2 = (void *)&augmented_args->arg.value + augmented_args->arg.size;
 
 	newpath_len = augmented_arg__read_str(arg2, newpath_arg, sizeof(augmented_args->arg.value));
@@ -314,6 +319,10 @@ int sys_enter_renameat2(struct syscall_enter_args *args)
 	oldpath_len = augmented_arg__read_str(&augmented_args->arg, oldpath_arg, sizeof(augmented_args->arg.value));
 	augmented_args->arg.size = PERF_ALIGN(oldpath_len + 1, sizeof(u64));
 	len += augmented_args->arg.size;
+
+	/* Every read from userspace is limited to value size */
+	if (augmented_args->arg.size > sizeof(augmented_args->arg.value))
+		return 1; /* Failure: don't filter */
 
 	struct augmented_arg *arg2 = (void *)&augmented_args->arg.value + augmented_args->arg.size;
 
@@ -423,8 +432,9 @@ static bool pid_filter__has(struct pids_filtered *pids, pid_t pid)
 static int augment_sys_enter(void *ctx, struct syscall_enter_args *args)
 {
 	bool augmented, do_output = false;
-	int zero = 0, size, aug_size, index, output = 0,
-	    value_size = sizeof(struct augmented_arg) - offsetof(struct augmented_arg, value);
+	int zero = 0, index, value_size = sizeof(struct augmented_arg) - offsetof(struct augmented_arg, value);
+	u64 output = 0; /* has to be u64, otherwise it won't pass the verifier */
+	s64 aug_size, size;
 	unsigned int nr, *beauty_map;
 	struct beauty_payload_enter *payload;
 	void *arg, *payload_offset;
@@ -475,12 +485,11 @@ static int augment_sys_enter(void *ctx, struct syscall_enter_args *args)
 		} else if (size > 0 && size <= value_size) { /* struct */
 			if (!bpf_probe_read_user(((struct augmented_arg *)payload_offset)->value, size, arg))
 				augmented = true;
-		} else if (size < 0 && size >= -6) { /* buffer */
+		} else if ((int)size < 0 && size >= -6) { /* buffer */
 			index = -(size + 1);
-			aug_size = args->args[index];
-
-			if (aug_size > TRACE_AUG_MAX_BUF)
-				aug_size = TRACE_AUG_MAX_BUF;
+			barrier_var(index); // Prevent clang (noticed with v18) from removing the &= 7 trick.
+			index &= 7;	    // Satisfy the bounds checking with the verifier in some kernels.
+			aug_size = args->args[index] > TRACE_AUG_MAX_BUF ? TRACE_AUG_MAX_BUF : args->args[index];
 
 			if (aug_size > 0) {
 				if (!bpf_probe_read_user(((struct augmented_arg *)payload_offset)->value, aug_size, arg))
@@ -488,9 +497,16 @@ static int augment_sys_enter(void *ctx, struct syscall_enter_args *args)
 			}
 		}
 
+		/* Augmented data size is limited to sizeof(augmented_arg->unnamed union with value field) */
+		if (aug_size > value_size)
+			aug_size = value_size;
+
 		/* write data to payload */
 		if (augmented) {
 			int written = offsetof(struct augmented_arg, value) + aug_size;
+
+			if (written < 0 || written > sizeof(struct augmented_arg))
+				return 1;
 
 			((struct augmented_arg *)payload_offset)->size = aug_size;
 			output += written;
@@ -499,7 +515,7 @@ static int augment_sys_enter(void *ctx, struct syscall_enter_args *args)
 		}
 	}
 
-	if (!do_output)
+	if (!do_output || (sizeof(struct syscall_enter_args) + output) > sizeof(struct beauty_payload_enter))
 		return 1;
 
 	return augmented__beauty_output(ctx, payload, sizeof(struct syscall_enter_args) + output);

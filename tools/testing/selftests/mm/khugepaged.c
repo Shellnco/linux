@@ -394,7 +394,7 @@ static void *file_setup_area(int nr_hpages)
 		perror("open()");
 		exit(EXIT_FAILURE);
 	}
-	p = mmap(BASE_ADDR, size, PROT_READ | PROT_EXEC,
+	p = mmap(BASE_ADDR, size, PROT_READ,
 		 MAP_PRIVATE, finfo.fd, 0);
 	if (p == MAP_FAILED || p != BASE_ADDR) {
 		perror("mmap()");
@@ -560,8 +560,6 @@ static bool wait_for_scan(const char *msg, char *p, int nr_hpages,
 		printf(".");
 		usleep(TICK);
 	}
-
-	madvise(p, nr_hpages * hpage_pmd_size, MADV_NOHUGEPAGE);
 
 	return timeout == -1;
 }
@@ -1091,7 +1089,7 @@ static void usage(void)
 	fprintf(stderr, "\n\t\"file,all\" mem_type requires kernel built with\n");
 	fprintf(stderr,	"\tCONFIG_READ_ONLY_THP_FOR_FS=y\n");
 	fprintf(stderr, "\n\tif [dir] is a (sub)directory of a tmpfs mount, tmpfs must be\n");
-	fprintf(stderr,	"\tmounted with huge=madvise option for khugepaged tests to work\n");
+	fprintf(stderr,	"\tmounted with huge=advise option for khugepaged tests to work\n");
 	fprintf(stderr,	"\n\tSupported Options:\n");
 	fprintf(stderr,	"\t\t-h: This help message.\n");
 	fprintf(stderr,	"\t\t-s: mTHP size, expressed as page order.\n");
@@ -1189,6 +1187,11 @@ int main(int argc, char **argv)
 		 */
 		.read_ahead_kb = 0,
 	};
+
+	if (!thp_is_enabled()) {
+		printf("Transparent Hugepages not available\n");
+		return KSFT_SKIP;
+	}
 
 	parse_test_type(argc, argv);
 

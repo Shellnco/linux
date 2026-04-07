@@ -268,7 +268,7 @@ static const struct of_device_id of_flash_match[] = {
 MODULE_DEVICE_TABLE(of, of_flash_match);
 
 static const char * const of_default_part_probes[] = {
-	"cmdlinepart", "RedBoot", "ofpart", "ofoldpart", NULL
+	"cmdlinepart", "ofpart", "ofoldpart", "RedBoot", NULL
 };
 
 static const char * const *of_get_part_probes(struct platform_device *dev)
@@ -621,7 +621,7 @@ static void physmap_flash_shutdown(struct platform_device *dev)
 
 static struct platform_driver physmap_flash_driver = {
 	.probe		= physmap_flash_probe,
-	.remove_new	= physmap_flash_remove,
+	.remove		= physmap_flash_remove,
 	.shutdown	= physmap_flash_shutdown,
 	.driver		= {
 		.name	= "physmap-flash",

@@ -987,7 +987,7 @@ static int init_low_level_driver(struct fman_port *port)
 		return -ENODEV;
 	}
 
-	/* The code bellow is a trick so the FM will not release the buffer
+	/* The code below is a trick so the FM will not release the buffer
 	 * to BM nor will try to enqueue the frame to QM
 	 */
 	if (port->port_type == FMAN_PORT_TYPE_TX) {
@@ -1297,7 +1297,7 @@ int fman_port_config(struct fman_port *port, struct fman_port_params *params)
 	int err;
 
 	/* Allocate the FM driver's parameters structure */
-	port->cfg = kzalloc(sizeof(*port->cfg), GFP_KERNEL);
+	port->cfg = kzalloc_obj(*port->cfg);
 	if (!port->cfg)
 		return -EINVAL;
 
@@ -1753,7 +1753,7 @@ static int fman_port_probe(struct platform_device *of_dev)
 	u16 port_speed;
 	u8 port_id;
 
-	port = kzalloc(sizeof(*port), GFP_KERNEL);
+	port = kzalloc_obj(*port);
 	if (!port)
 		return -ENOMEM;
 

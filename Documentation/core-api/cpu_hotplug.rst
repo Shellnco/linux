@@ -8,7 +8,7 @@ CPU hotplug in the Kernel
          Srivatsa Vaddagiri <vatsa@in.ibm.com>,
          Ashok Raj <ashok.raj@intel.com>,
          Joel Schopp <jschopp@austin.ibm.com>,
-	 Thomas Gleixner <tglx@linutronix.de>
+	 Thomas Gleixner <tglx@kernel.org>
 
 Introduction
 ============
@@ -616,7 +616,7 @@ ONLINE section for notifications on online and offline operation::
    ....
    cpuhp_remove_instance(state, &inst2->node);
    ....
-   remove_multi_state(state);
+   cpuhp_remove_multi_state(state);
 
 
 Testing of hotplug states

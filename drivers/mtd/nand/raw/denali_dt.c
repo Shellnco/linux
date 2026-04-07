@@ -115,7 +115,6 @@ static int denali_dt_probe(struct platform_device *pdev)
 	struct denali_dt *dt;
 	const struct denali_dt_data *data;
 	struct denali_controller *denali;
-	struct device_node *np;
 	int ret;
 
 	dt = devm_kzalloc(dev, sizeof(*dt), GFP_KERNEL);
@@ -192,12 +191,10 @@ static int denali_dt_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_assert_rst;
 
-	for_each_child_of_node(dev->of_node, np) {
+	for_each_child_of_node_scoped(dev->of_node, np) {
 		ret = denali_dt_chip_init(denali, np);
-		if (ret) {
-			of_node_put(np);
+		if (ret)
 			goto out_remove_denali;
-		}
 	}
 
 	platform_set_drvdata(pdev, dt);
@@ -225,7 +222,7 @@ static void denali_dt_remove(struct platform_device *pdev)
 
 static struct platform_driver denali_dt_driver = {
 	.probe		= denali_dt_probe,
-	.remove_new	= denali_dt_remove,
+	.remove		= denali_dt_remove,
 	.driver		= {
 		.name	= "denali-nand-dt",
 		.of_match_table	= denali_nand_dt_ids,

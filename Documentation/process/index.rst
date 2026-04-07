@@ -68,17 +68,22 @@ beyond).
    stable-kernel-rules
    management-style
    researcher-guidelines
+   generated-content
+   coding-assistants
+   conclave
 
 Dealing with bugs
 -----------------
 
-Bugs are a fact of life; it is important that we handle them properly.
-The documents below describe our policies around the handling of a couple
-of special classes of bugs: regressions and security problems.
+Bugs are a fact of life; it is important that we handle them properly. The
+documents below provide general advice about debugging and describe our
+policies around the handling of a couple of special classes of bugs:
+regressions and security problems.
 
 .. toctree::
    :maxdepth: 1
 
+   debugging/index
    handling-regressions
    security-bugs
    cve
@@ -106,10 +111,3 @@ developers:
 
    kernel-docs
    deprecated
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`

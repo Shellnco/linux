@@ -361,7 +361,7 @@ static const struct genl_multicast_group tcmu_mcgrps[] = {
 	[TCMU_MCGRP_CONFIG] = { .name = "config", },
 };
 
-static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
+static const struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX + 1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
 	[TCMU_ATTR_MINOR]	= { .type = NLA_U32 },
 	[TCMU_ATTR_CMD_STATUS]	= { .type = NLA_S32 },
@@ -1232,7 +1232,7 @@ static void tcmu_set_next_deadline(struct list_head *queue,
 		cmd = list_first_entry(queue, struct tcmu_cmd, queue_entry);
 		mod_timer(timer, cmd->deadline);
 	} else
-		del_timer(timer);
+		timer_delete(timer);
 }
 
 static int
@@ -1293,7 +1293,7 @@ tcmu_tmr_notify(struct se_device *se_dev, enum tcm_tmreq_table tmf,
 	pr_debug("TMR event %d on dev %s, aborted cmds %d, afflicted cmd_ids %d\n",
 		 tcmu_tmr_type(tmf), udev->name, i, cmd_cnt);
 
-	tmr = kmalloc(struct_size(tmr, tmr_cmd_ids, cmd_cnt), GFP_NOIO);
+	tmr = kmalloc_flex(*tmr, tmr_cmd_ids, cmd_cnt, GFP_NOIO);
 	if (!tmr)
 		goto unlock;
 
@@ -1564,7 +1564,7 @@ static void tcmu_device_timedout(struct tcmu_dev *udev)
 
 static void tcmu_cmd_timedout(struct timer_list *t)
 {
-	struct tcmu_dev *udev = from_timer(udev, t, cmd_timer);
+	struct tcmu_dev *udev = timer_container_of(udev, t, cmd_timer);
 
 	pr_debug("%s cmd timeout has expired\n", udev->name);
 	tcmu_device_timedout(udev);
@@ -1572,7 +1572,7 @@ static void tcmu_cmd_timedout(struct timer_list *t)
 
 static void tcmu_qfull_timedout(struct timer_list *t)
 {
-	struct tcmu_dev *udev = from_timer(udev, t, qfull_timer);
+	struct tcmu_dev *udev = timer_container_of(udev, t, qfull_timer);
 
 	pr_debug("%s qfull timeout has expired\n", udev->name);
 	tcmu_device_timedout(udev);
@@ -1582,7 +1582,7 @@ static int tcmu_attach_hba(struct se_hba *hba, u32 host_id)
 {
 	struct tcmu_hba *tcmu_hba;
 
-	tcmu_hba = kzalloc(sizeof(struct tcmu_hba), GFP_KERNEL);
+	tcmu_hba = kzalloc_obj(struct tcmu_hba);
 	if (!tcmu_hba)
 		return -ENOMEM;
 
@@ -1602,7 +1602,7 @@ static struct se_device *tcmu_alloc_device(struct se_hba *hba, const char *name)
 {
 	struct tcmu_dev *udev;
 
-	udev = kzalloc(sizeof(struct tcmu_dev), GFP_KERNEL);
+	udev = kzalloc_obj(struct tcmu_dev);
 	if (!udev)
 		return NULL;
 	kref_init(&udev->kref);
@@ -2130,7 +2130,7 @@ static int tcmu_netlink_event_send(struct tcmu_dev *udev,
 	}
 
 	ret = genlmsg_multicast_allns(&tcmu_genl_family, skb, 0,
-				      TCMU_MCGRP_CONFIG, GFP_KERNEL);
+				      TCMU_MCGRP_CONFIG);
 
 	/* Wait during an add as the listener may not be up yet */
 	if (ret == 0 ||
@@ -2321,8 +2321,8 @@ static void tcmu_destroy_device(struct se_device *dev)
 {
 	struct tcmu_dev *udev = TCMU_DEV(dev);
 
-	del_timer_sync(&udev->cmd_timer);
-	del_timer_sync(&udev->qfull_timer);
+	timer_delete_sync(&udev->cmd_timer);
+	timer_delete_sync(&udev->qfull_timer);
 
 	mutex_lock(&root_udev_mutex);
 	list_del(&udev->node);
@@ -2408,7 +2408,7 @@ static void tcmu_reset_ring(struct tcmu_dev *udev, u8 err_level)
 	tcmu_flush_dcache_range(mb, sizeof(*mb));
 	clear_bit(TCMU_DEV_BIT_BROKEN, &udev->flags);
 
-	del_timer(&udev->cmd_timer);
+	timer_delete(&udev->cmd_timer);
 
 	/*
 	 * ring is empty and qfull queue never contains aborted commands.
@@ -2430,7 +2430,7 @@ enum {
 	Opt_cmd_ring_size_mb, Opt_err,
 };
 
-static match_table_t tokens = {
+static const match_table_t tokens = {
 	{Opt_dev_config, "dev_config=%s"},
 	{Opt_dev_size, "dev_size=%s"},
 	{Opt_hw_block_size, "hw_block_size=%d"},

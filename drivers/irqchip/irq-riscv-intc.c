@@ -166,7 +166,8 @@ static int riscv_intc_domain_alloc(struct irq_domain *domain,
 static const struct irq_domain_ops riscv_intc_domain_ops = {
 	.map	= riscv_intc_domain_map,
 	.xlate	= irq_domain_xlate_onecell,
-	.alloc	= riscv_intc_domain_alloc
+	.alloc	= riscv_intc_domain_alloc,
+	.free	= irq_domain_free_irqs_top,
 };
 
 static struct fwnode_handle *riscv_intc_hwnode(void)
@@ -242,7 +243,7 @@ static int __init riscv_intc_init(struct device_node *node,
 		chip = &andes_intc_chip;
 	}
 
-	return riscv_intc_init_common(of_node_to_fwnode(node), chip);
+	return riscv_intc_init_common(of_fwnode_handle(node), chip);
 }
 
 IRQCHIP_DECLARE(riscv, "riscv,cpu-intc", riscv_intc_init);
@@ -265,7 +266,7 @@ struct rintc_data {
 };
 
 static u32 nr_rintc;
-static struct rintc_data *rintc_acpi_data[NR_CPUS];
+static struct rintc_data **rintc_acpi_data;
 
 #define for_each_matching_plic(_plic_id)				\
 	unsigned int _plic;						\
@@ -329,15 +330,32 @@ int acpi_rintc_get_imsic_mmio_info(u32 index, struct resource *res)
 	return 0;
 }
 
+static int __init riscv_intc_acpi_match(union acpi_subtable_headers *header,
+					const unsigned long end)
+{
+	return 0;
+}
+
 static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
 				       const unsigned long end)
 {
 	struct acpi_madt_rintc *rintc;
 	struct fwnode_handle *fn;
+	int count;
 	int rc;
 
+	if (!rintc_acpi_data) {
+		count = acpi_table_parse_madt(ACPI_MADT_TYPE_RINTC, riscv_intc_acpi_match, 0);
+		if (count <= 0)
+			return -EINVAL;
+
+		rintc_acpi_data = kzalloc_objs(*rintc_acpi_data, count);
+		if (!rintc_acpi_data)
+			return -ENOMEM;
+	}
+
 	rintc = (struct acpi_madt_rintc *)header;
-	rintc_acpi_data[nr_rintc] = kzalloc(sizeof(*rintc_acpi_data[0]), GFP_KERNEL);
+	rintc_acpi_data[nr_rintc] = kzalloc_obj(*rintc_acpi_data[0]);
 	if (!rintc_acpi_data[nr_rintc])
 		return -ENOMEM;
 

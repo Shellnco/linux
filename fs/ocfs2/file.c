@@ -19,6 +19,7 @@
 #include <linux/mount.h>
 #include <linux/writeback.h>
 #include <linux/falloc.h>
+#include <linux/filelock.h>
 #include <linux/quotaops.h>
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
@@ -53,7 +54,7 @@ static int ocfs2_init_file_private(struct inode *inode, struct file *file)
 {
 	struct ocfs2_file_private *fp;
 
-	fp = kzalloc(sizeof(struct ocfs2_file_private), GFP_KERNEL);
+	fp = kzalloc_obj(struct ocfs2_file_private);
 	if (!fp)
 		return -ENOMEM;
 
@@ -179,7 +180,7 @@ static int ocfs2_sync_file(struct file *file, loff_t start, loff_t end,
 			      file->f_path.dentry->d_name.name,
 			      (unsigned long long)datasync);
 
-	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
+	if (unlikely(ocfs2_emergency_state(osb)))
 		return -EROFS;
 
 	err = file_write_and_wait_range(file, start, end);
@@ -209,7 +210,7 @@ int ocfs2_should_update_atime(struct inode *inode,
 	struct timespec64 now;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 
-	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
+	if (unlikely(ocfs2_emergency_state(osb)))
 		return 0;
 
 	if ((inode->i_flags & S_NOATIME) ||
@@ -782,11 +783,11 @@ static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
 		goto out_commit_trans;
 	}
 
-	/* Get the offsets within the page that we want to zero */
-	zero_from = abs_from & (PAGE_SIZE - 1);
-	zero_to = abs_to & (PAGE_SIZE - 1);
+	/* Get the offsets within the folio that we want to zero */
+	zero_from = offset_in_folio(folio, abs_from);
+	zero_to = offset_in_folio(folio, abs_to);
 	if (!zero_to)
-		zero_to = PAGE_SIZE;
+		zero_to = folio_size(folio);
 
 	trace_ocfs2_write_zero_page(
 			(unsigned long long)OCFS2_I(inode)->ip_blkno,
@@ -813,7 +814,7 @@ static int ocfs2_write_zero_page(struct inode *inode, u64 abs_from,
 
 
 		/* must not update i_size! */
-		block_commit_write(&folio->page, block_start + 1, block_start + 1);
+		block_commit_write(folio, block_start + 1, block_start + 1);
 	}
 
 	/*
@@ -1129,9 +1130,18 @@ int ocfs2_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	trace_ocfs2_setattr(inode, dentry,
 			    (unsigned long long)OCFS2_I(inode)->ip_blkno,
 			    dentry->d_name.len, dentry->d_name.name,
-			    attr->ia_valid, attr->ia_mode,
-			    from_kuid(&init_user_ns, attr->ia_uid),
-			    from_kgid(&init_user_ns, attr->ia_gid));
+			    attr->ia_valid,
+				attr->ia_valid & ATTR_MODE ? attr->ia_mode : 0,
+				attr->ia_valid & ATTR_UID ?
+					from_kuid(&init_user_ns, attr->ia_uid) : 0,
+				attr->ia_valid & ATTR_GID ?
+					from_kgid(&init_user_ns, attr->ia_gid) : 0);
+
+	status = ocfs2_emergency_state(osb);
+	if (unlikely(status)) {
+		mlog_errno(status);
+		goto bail;
+	}
 
 	/* ensuring we don't even attempt to truncate a symlink */
 	if (S_ISLNK(inode->i_mode))
@@ -1784,6 +1794,14 @@ int ocfs2_remove_inode_range(struct inode *inode,
 		return 0;
 
 	if (OCFS2_I(inode)->ip_dyn_features & OCFS2_INLINE_DATA_FL) {
+		int id_count = ocfs2_max_inline_data_with_xattr(inode->i_sb, di);
+
+		if (byte_start > id_count || byte_start + byte_len > id_count) {
+			ret = -EINVAL;
+			mlog_errno(ret);
+			goto out;
+		}
+
 		ret = ocfs2_truncate_inline(inode, di_bh, byte_start,
 					    byte_start + byte_len, 0);
 		if (ret) {
@@ -1932,7 +1950,7 @@ static int __ocfs2_change_file_space(struct file *file, struct inode *inode,
 	handle_t *handle;
 	unsigned long long max_off = inode->i_sb->s_maxbytes;
 
-	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
+	if (unlikely(ocfs2_emergency_state(osb)))
 		return -EROFS;
 
 	inode_lock(inode);
@@ -2387,6 +2405,8 @@ static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
 	} else
 		inode_lock(inode);
 
+	ocfs2_iocb_init_rw_locked(iocb);
+
 	/*
 	 * Concurrent O_DIRECT writes are allowed with
 	 * mount_option "coherency=buffered".
@@ -2532,6 +2552,8 @@ static ssize_t ocfs2_file_read_iter(struct kiocb *iocb,
 
 	if (!direct_io && nowait)
 		return -EOPNOTSUPP;
+
+	ocfs2_iocb_init_rw_locked(iocb);
 
 	/*
 	 * buffered reads protect themselves in ->read_folio().  O_DIRECT reads
@@ -2692,7 +2714,7 @@ static loff_t ocfs2_remap_file_range(struct file *file_in, loff_t pos_in,
 		return -EINVAL;
 	if (!ocfs2_refcount_tree(osb))
 		return -EOPNOTSUPP;
-	if (ocfs2_is_hard_readonly(osb) || ocfs2_is_soft_readonly(osb))
+	if (unlikely(ocfs2_emergency_state(osb)))
 		return -EROFS;
 
 	/* Lock both files against IO */
@@ -2785,7 +2807,7 @@ const struct inode_operations ocfs2_special_file_iops = {
  */
 const struct file_operations ocfs2_fops = {
 	.llseek		= ocfs2_file_llseek,
-	.mmap		= ocfs2_mmap,
+	.mmap_prepare	= ocfs2_mmap_prepare,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_file_release,
 	.open		= ocfs2_file_open,
@@ -2801,6 +2823,8 @@ const struct file_operations ocfs2_fops = {
 	.splice_write	= iter_file_splice_write,
 	.fallocate	= ocfs2_fallocate,
 	.remap_file_range = ocfs2_remap_file_range,
+	.fop_flags	= FOP_ASYNC_LOCK,
+	.setlease	= generic_setlease,
 };
 
 WRAP_DIR_ITER(ocfs2_readdir) // FIXME!
@@ -2817,6 +2841,8 @@ const struct file_operations ocfs2_dops = {
 #endif
 	.lock		= ocfs2_lock,
 	.flock		= ocfs2_flock,
+	.fop_flags	= FOP_ASYNC_LOCK,
+	.setlease	= generic_setlease,
 };
 
 /*
@@ -2833,7 +2859,7 @@ const struct file_operations ocfs2_dops = {
  */
 const struct file_operations ocfs2_fops_no_plocks = {
 	.llseek		= ocfs2_file_llseek,
-	.mmap		= ocfs2_mmap,
+	.mmap_prepare	= ocfs2_mmap_prepare,
 	.fsync		= ocfs2_sync_file,
 	.release	= ocfs2_file_release,
 	.open		= ocfs2_file_open,
@@ -2848,6 +2874,7 @@ const struct file_operations ocfs2_fops_no_plocks = {
 	.splice_write	= iter_file_splice_write,
 	.fallocate	= ocfs2_fallocate,
 	.remap_file_range = ocfs2_remap_file_range,
+	.setlease	= generic_setlease,
 };
 
 const struct file_operations ocfs2_dops_no_plocks = {
@@ -2862,4 +2889,5 @@ const struct file_operations ocfs2_dops_no_plocks = {
 	.compat_ioctl   = ocfs2_compat_ioctl,
 #endif
 	.flock		= ocfs2_flock,
+	.setlease	= generic_setlease,
 };

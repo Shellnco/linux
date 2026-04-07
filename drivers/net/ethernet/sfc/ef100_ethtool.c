@@ -54,11 +54,13 @@ const struct ethtool_ops ef100_ethtool_ops = {
 	.get_ethtool_stats	= efx_ethtool_get_stats,
 	.get_rxnfc              = efx_ethtool_get_rxnfc,
 	.set_rxnfc              = efx_ethtool_set_rxnfc,
+	.get_rx_ring_count	= efx_ethtool_get_rx_ring_count,
 	.reset                  = efx_ethtool_reset,
 
 	.get_rxfh_indir_size	= efx_ethtool_get_rxfh_indir_size,
 	.get_rxfh_key_size	= efx_ethtool_get_rxfh_key_size,
 	.rxfh_per_ctx_key	= true,
+	.cap_rss_rxnfc_adds	= true,
 	.rxfh_priv_size		= sizeof(struct efx_rss_context_priv),
 	.get_rxfh		= efx_ethtool_get_rxfh,
 	.set_rxfh		= efx_ethtool_set_rxfh,

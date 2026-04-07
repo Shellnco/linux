@@ -35,7 +35,7 @@ int sof_intel_board_card_late_probe(struct snd_soc_card *card)
 
 	return hda_dsp_hdmi_build_controls(card, ctx->hdmi.hdmi_comp);
 }
-EXPORT_SYMBOL_NS(sof_intel_board_card_late_probe, SND_SOC_INTEL_SOF_BOARD_HELPERS);
+EXPORT_SYMBOL_NS(sof_intel_board_card_late_probe, "SND_SOC_INTEL_SOF_BOARD_HELPERS");
 
 /*
  * DMIC DAI Link
@@ -51,16 +51,17 @@ static const struct snd_soc_dapm_route dmic_routes[] = {
 static int dmic_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	int ret;
 
-	ret = snd_soc_dapm_new_controls(&card->dapm, dmic_widgets,
+	ret = snd_soc_dapm_new_controls(dapm, dmic_widgets,
 					ARRAY_SIZE(dmic_widgets));
 	if (ret) {
 		dev_err(rtd->dev, "fail to add dmic widgets, ret %d\n", ret);
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, dmic_routes,
+	ret = snd_soc_dapm_add_routes(dapm, dmic_routes,
 				      ARRAY_SIZE(dmic_routes));
 	if (ret) {
 		dev_err(rtd->dev, "fail to add dmic routes, ret %d\n", ret);
@@ -111,16 +112,17 @@ static const struct snd_soc_dapm_route hda_routes[] = {
 static int hda_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	int ret;
 
-	ret = snd_soc_dapm_new_controls(&card->dapm, hda_widgets,
+	ret = snd_soc_dapm_new_controls(dapm, hda_widgets,
 					ARRAY_SIZE(hda_widgets));
 	if (ret) {
 		dev_err(rtd->dev, "fail to add hda widgets, ret %d\n", ret);
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, hda_routes,
+	ret = snd_soc_dapm_add_routes(dapm, hda_routes,
 				      ARRAY_SIZE(hda_routes));
 	if (ret)
 		dev_err(rtd->dev, "fail to add hda routes, ret %d\n", ret);
@@ -217,8 +219,6 @@ static int set_ssp_codec_link(struct device *dev, struct snd_soc_dai_link *link,
 
 	link->id = be_id;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1;
-	link->dpcm_playback = 1;
 
 	return 0;
 }
@@ -268,7 +268,7 @@ static int set_dmic_link(struct device *dev, struct snd_soc_dai_link *link,
 		link->init = dmic_init;
 	link->ignore_suspend = 1;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1;
+	link->capture_only = 1;
 
 	return 0;
 }
@@ -326,7 +326,7 @@ static int set_idisp_hdmi_link(struct device *dev, struct snd_soc_dai_link *link
 	link->id = be_id;
 	link->init = (hdmi_id == 1) ? hdmi_init : NULL;
 	link->no_pcm = 1;
-	link->dpcm_playback = 1;
+	link->playback_only = 1;
 
 	return 0;
 }
@@ -361,13 +361,12 @@ static int set_ssp_amp_link(struct device *dev, struct snd_soc_dai_link *link,
 	/* codecs - caller to handle */
 
 	/* platforms */
+	/* feedback stream or firmware-generated echo reference */
 	link->platforms = platform_component;
 	link->num_platforms = ARRAY_SIZE(platform_component);
 
 	link->id = be_id;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1; /* feedback stream or firmware-generated echo reference */
-	link->dpcm_playback = 1;
 
 	return 0;
 }
@@ -407,8 +406,6 @@ static int set_bt_offload_link(struct device *dev, struct snd_soc_dai_link *link
 
 	link->id = be_id;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1;
-	link->dpcm_playback = 1;
 
 	return 0;
 }
@@ -448,7 +445,7 @@ static int set_hdmi_in_link(struct device *dev, struct snd_soc_dai_link *link,
 
 	link->id = be_id;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1;
+	link->capture_only = 1;
 
 	return 0;
 }
@@ -496,8 +493,6 @@ static int set_hda_codec_link(struct device *dev, struct snd_soc_dai_link *link,
 	if (be_type == SOF_HDA_ANALOG)
 		link->init = hda_init;
 	link->no_pcm = 1;
-	link->dpcm_capture = 1;
-	link->dpcm_playback = 1;
 
 	return 0;
 }
@@ -738,7 +733,7 @@ int sof_intel_board_set_dai_link(struct device *dev, struct snd_soc_card *card,
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(sof_intel_board_set_dai_link, SND_SOC_INTEL_SOF_BOARD_HELPERS);
+EXPORT_SYMBOL_NS(sof_intel_board_set_dai_link, "SND_SOC_INTEL_SOF_BOARD_HELPERS");
 
 struct sof_card_private *
 sof_intel_board_get_ctx(struct device *dev, unsigned long board_quirk)
@@ -781,10 +776,10 @@ sof_intel_board_get_ctx(struct device *dev, unsigned long board_quirk)
 
 	return ctx;
 }
-EXPORT_SYMBOL_NS(sof_intel_board_get_ctx, SND_SOC_INTEL_SOF_BOARD_HELPERS);
+EXPORT_SYMBOL_NS(sof_intel_board_get_ctx, "SND_SOC_INTEL_SOF_BOARD_HELPERS");
 
 MODULE_DESCRIPTION("ASoC Intel SOF Machine Driver Board Helpers");
 MODULE_AUTHOR("Brent Lu <brent.lu@intel.com>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(SND_SOC_INTEL_HDA_DSP_COMMON);
-MODULE_IMPORT_NS(SND_SOC_ACPI_INTEL_MATCH);
+MODULE_IMPORT_NS("SND_SOC_INTEL_HDA_DSP_COMMON");
+MODULE_IMPORT_NS("SND_SOC_ACPI_INTEL_MATCH");

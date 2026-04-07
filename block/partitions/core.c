@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/major.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/vmalloc.h>
 #include <linux/raid/detect.h>
@@ -42,6 +43,9 @@ static int (*const check_part[])(struct parsed_partitions *) = {
 
 #ifdef CONFIG_CMDLINE_PARTITION
 	cmdline_partition,
+#endif
+#ifdef CONFIG_OF_PARTITION
+	of_partition,		/* cmdline have priority to OF */
 #endif
 #ifdef CONFIG_EFI_PARTITION
 	efi_partition,		/* this must come before msdos */
@@ -90,7 +94,7 @@ static struct parsed_partitions *allocate_partitions(struct gendisk *hd)
 	struct parsed_partitions *state;
 	int nr = DISK_MAX_PARTS;
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (!state)
 		return NULL;
 
@@ -127,7 +131,7 @@ static struct parsed_partitions *check_partition(struct gendisk *hd)
 	state->pp_buf[0] = '\0';
 
 	state->disk = hd;
-	snprintf(state->name, BDEVNAME_SIZE, "%s", hd->disk_name);
+	strscpy(state->name, hd->disk_name);
 	snprintf(state->pp_buf, PAGE_SIZE, " %s:", state->name);
 	if (isdigit(state->name[strlen(state->name)-1]))
 		sprintf(state->name, "p");
@@ -253,6 +257,8 @@ static int part_uevent(const struct device *dev, struct kobj_uevent_env *env)
 	add_uevent_var(env, "PARTN=%u", bdev_partno(part));
 	if (part->bd_meta_info && part->bd_meta_info->volname[0])
 		add_uevent_var(env, "PARTNAME=%s", part->bd_meta_info->volname);
+	if (part->bd_meta_info && part->bd_meta_info->uuid[0])
+		add_uevent_var(env, "PARTUUID=%s", part->bd_meta_info->uuid);
 	return 0;
 }
 
@@ -372,6 +378,9 @@ static struct block_device *add_partition(struct gendisk *disk, int partno,
 		if (err)
 			goto out_del;
 	}
+
+	if (flags & ADDPART_FLAG_READONLY)
+		bdev_set_flag(bdev, BD_READ_ONLY);
 
 	/* everything is up and running, commence */
 	err = xa_insert(&disk->part_tbl, partno, bdev, GFP_KERNEL);

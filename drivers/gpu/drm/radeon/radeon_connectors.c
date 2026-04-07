@@ -806,7 +806,7 @@ static int radeon_lvds_get_modes(struct drm_connector *connector)
 }
 
 static enum drm_mode_status radeon_lvds_mode_valid(struct drm_connector *connector,
-				  struct drm_display_mode *mode)
+				  const struct drm_display_mode *mode)
 {
 	struct drm_encoder *encoder = radeon_best_single_encoder(connector);
 
@@ -875,10 +875,8 @@ radeon_lvds_detect(struct drm_connector *connector, bool force)
 
 	radeon_connector_update_scratch_regs(connector, ret);
 
-	if (!drm_kms_helper_is_poll_worker()) {
-		pm_runtime_mark_last_busy(connector->dev->dev);
+	if (!drm_kms_helper_is_poll_worker())
 		pm_runtime_put_autosuspend(connector->dev->dev);
-	}
 
 	return ret;
 }
@@ -968,7 +966,7 @@ static int radeon_vga_get_modes(struct drm_connector *connector)
 }
 
 static enum drm_mode_status radeon_vga_mode_valid(struct drm_connector *connector,
-				  struct drm_display_mode *mode)
+				  const struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
 	struct radeon_device *rdev = dev->dev_private;
@@ -1066,10 +1064,8 @@ radeon_vga_detect(struct drm_connector *connector, bool force)
 	radeon_connector_update_scratch_regs(connector, ret);
 
 out:
-	if (!drm_kms_helper_is_poll_worker()) {
-		pm_runtime_mark_last_busy(connector->dev->dev);
+	if (!drm_kms_helper_is_poll_worker())
 		pm_runtime_put_autosuspend(connector->dev->dev);
-	}
 
 	return ret;
 }
@@ -1116,7 +1112,7 @@ static int radeon_tv_get_modes(struct drm_connector *connector)
 }
 
 static enum drm_mode_status radeon_tv_mode_valid(struct drm_connector *connector,
-				struct drm_display_mode *mode)
+				const struct drm_display_mode *mode)
 {
 	if ((mode->hdisplay > 1024) || (mode->vdisplay > 768))
 		return MODE_CLOCK_RANGE;
@@ -1154,10 +1150,8 @@ radeon_tv_detect(struct drm_connector *connector, bool force)
 		ret = radeon_connector_analog_encoder_conflict_solve(connector, encoder, ret, false);
 	radeon_connector_update_scratch_regs(connector, ret);
 
-	if (!drm_kms_helper_is_poll_worker()) {
-		pm_runtime_mark_last_busy(connector->dev->dev);
+	if (!drm_kms_helper_is_poll_worker())
 		pm_runtime_put_autosuspend(connector->dev->dev);
-	}
 
 	return ret;
 }
@@ -1255,16 +1249,6 @@ radeon_dvi_detect(struct drm_connector *connector, bool force)
 			goto exit;
 		}
 	}
-
-	if (dret && radeon_connector->hpd.hpd != RADEON_HPD_NONE &&
-	    !radeon_hpd_sense(rdev, radeon_connector->hpd.hpd) &&
-	    connector->connector_type == DRM_MODE_CONNECTOR_HDMIA) {
-		DRM_DEBUG_KMS("EDID is readable when HPD disconnected\n");
-		schedule_delayed_work(&rdev->hotplug_work, msecs_to_jiffies(1000));
-		ret = connector_status_disconnected;
-		goto exit;
-	}
-
 	if (dret) {
 		radeon_connector->detected_by_load = false;
 		radeon_connector_free_edid(connector);
@@ -1412,10 +1396,8 @@ out:
 	}
 
 exit:
-	if (!drm_kms_helper_is_poll_worker()) {
-		pm_runtime_mark_last_busy(connector->dev->dev);
+	if (!drm_kms_helper_is_poll_worker())
 		pm_runtime_put_autosuspend(connector->dev->dev);
-	}
 
 	return ret;
 }
@@ -1457,7 +1439,7 @@ static void radeon_dvi_force(struct drm_connector *connector)
 }
 
 static enum drm_mode_status radeon_dvi_mode_valid(struct drm_connector *connector,
-				  struct drm_display_mode *mode)
+				  const struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
 	struct radeon_device *rdev = dev->dev_private;
@@ -1724,16 +1706,14 @@ radeon_dp_detect(struct drm_connector *connector, bool force)
 	}
 
 out:
-	if (!drm_kms_helper_is_poll_worker()) {
-		pm_runtime_mark_last_busy(connector->dev->dev);
+	if (!drm_kms_helper_is_poll_worker())
 		pm_runtime_put_autosuspend(connector->dev->dev);
-	}
 
 	return ret;
 }
 
 static enum drm_mode_status radeon_dp_mode_valid(struct drm_connector *connector,
-				  struct drm_display_mode *mode)
+				  const struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
 	struct radeon_device *rdev = dev->dev_private;
@@ -1786,6 +1766,20 @@ static enum drm_mode_status radeon_dp_mode_valid(struct drm_connector *connector
 	return MODE_OK;
 }
 
+static int
+radeon_connector_late_register(struct drm_connector *connector)
+{
+	struct radeon_connector *radeon_connector = to_radeon_connector(connector);
+	int r = 0;
+
+	if (radeon_connector->ddc_bus->has_aux) {
+		radeon_connector->ddc_bus->aux.dev = radeon_connector->base.kdev;
+		r = drm_dp_aux_register(&radeon_connector->ddc_bus->aux);
+	}
+
+	return r;
+}
+
 static const struct drm_connector_helper_funcs radeon_dp_connector_helper_funcs = {
 	.get_modes = radeon_dp_get_modes,
 	.mode_valid = radeon_dp_mode_valid,
@@ -1800,6 +1794,7 @@ static const struct drm_connector_funcs radeon_dp_connector_funcs = {
 	.early_unregister = radeon_connector_unregister,
 	.destroy = radeon_connector_destroy,
 	.force = radeon_dvi_force,
+	.late_register = radeon_connector_late_register,
 };
 
 static const struct drm_connector_funcs radeon_edp_connector_funcs = {
@@ -1810,6 +1805,7 @@ static const struct drm_connector_funcs radeon_edp_connector_funcs = {
 	.early_unregister = radeon_connector_unregister,
 	.destroy = radeon_connector_destroy,
 	.force = radeon_dvi_force,
+	.late_register = radeon_connector_late_register,
 };
 
 static const struct drm_connector_funcs radeon_lvds_bridge_connector_funcs = {
@@ -1820,6 +1816,7 @@ static const struct drm_connector_funcs radeon_lvds_bridge_connector_funcs = {
 	.early_unregister = radeon_connector_unregister,
 	.destroy = radeon_connector_destroy,
 	.force = radeon_dvi_force,
+	.late_register = radeon_connector_late_register,
 };
 
 void
@@ -1890,7 +1887,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 		}
 	}
 
-	radeon_connector = kzalloc(sizeof(struct radeon_connector), GFP_KERNEL);
+	radeon_connector = kzalloc_obj(struct radeon_connector);
 	if (!radeon_connector)
 		return;
 
@@ -1910,7 +1907,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 	}
 
 	if (is_dp_bridge) {
-		radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+		radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 		if (!radeon_dig_connector)
 			goto failed;
 		radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2081,7 +2078,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 			break;
 		case DRM_MODE_CONNECTOR_DVII:
 		case DRM_MODE_CONNECTOR_DVID:
-			radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+			radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 			if (!radeon_dig_connector)
 				goto failed;
 			radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2143,7 +2140,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 			break;
 		case DRM_MODE_CONNECTOR_HDMIA:
 		case DRM_MODE_CONNECTOR_HDMIB:
-			radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+			radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 			if (!radeon_dig_connector)
 				goto failed;
 			radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2198,7 +2195,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 				connector->doublescan_allowed = false;
 			break;
 		case DRM_MODE_CONNECTOR_DisplayPort:
-			radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+			radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 			if (!radeon_dig_connector)
 				goto failed;
 			radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2253,7 +2250,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 			connector->doublescan_allowed = false;
 			break;
 		case DRM_MODE_CONNECTOR_eDP:
-			radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+			radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 			if (!radeon_dig_connector)
 				goto failed;
 			radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2300,7 +2297,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 			connector->doublescan_allowed = false;
 			break;
 		case DRM_MODE_CONNECTOR_LVDS:
-			radeon_dig_connector = kzalloc(sizeof(struct radeon_connector_atom_dig), GFP_KERNEL);
+			radeon_dig_connector = kzalloc_obj(struct radeon_connector_atom_dig);
 			if (!radeon_dig_connector)
 				goto failed;
 			radeon_dig_connector->igp_lane_info = igp_lane_info;
@@ -2382,7 +2379,7 @@ radeon_add_legacy_connector(struct drm_device *dev,
 		}
 	}
 
-	radeon_connector = kzalloc(sizeof(struct radeon_connector), GFP_KERNEL);
+	radeon_connector = kzalloc_obj(struct radeon_connector);
 	if (!radeon_connector)
 		return;
 

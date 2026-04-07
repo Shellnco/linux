@@ -765,7 +765,7 @@ static struct kobject *kobject_create(void)
 {
 	struct kobject *kobj;
 
-	kobj = kzalloc(sizeof(*kobj), GFP_KERNEL);
+	kobj = kzalloc_obj(*kobj);
 	if (!kobj)
 		return NULL;
 
@@ -962,7 +962,7 @@ static struct kset *kset_create(const char *name,
 	struct kset *kset;
 	int retval;
 
-	kset = kzalloc(sizeof(*kset), GFP_KERNEL);
+	kset = kzalloc_obj(*kset);
 	if (!kset)
 		return NULL;
 	retval = kobject_set_name(&kset->kobj, "%s", name);
@@ -1095,30 +1095,6 @@ void *kobj_ns_grab_current(enum kobj_ns_type type)
 	return ns;
 }
 EXPORT_SYMBOL_GPL(kobj_ns_grab_current);
-
-const void *kobj_ns_netlink(enum kobj_ns_type type, struct sock *sk)
-{
-	const void *ns = NULL;
-
-	spin_lock(&kobj_ns_type_lock);
-	if (kobj_ns_type_is_valid(type) && kobj_ns_ops_tbl[type])
-		ns = kobj_ns_ops_tbl[type]->netlink_ns(sk);
-	spin_unlock(&kobj_ns_type_lock);
-
-	return ns;
-}
-
-const void *kobj_ns_initial(enum kobj_ns_type type)
-{
-	const void *ns = NULL;
-
-	spin_lock(&kobj_ns_type_lock);
-	if (kobj_ns_type_is_valid(type) && kobj_ns_ops_tbl[type])
-		ns = kobj_ns_ops_tbl[type]->initial_ns();
-	spin_unlock(&kobj_ns_type_lock);
-
-	return ns;
-}
 
 void kobj_ns_drop(enum kobj_ns_type type, void *ns)
 {

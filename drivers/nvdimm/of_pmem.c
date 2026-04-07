@@ -26,7 +26,7 @@ static int of_pmem_region_probe(struct platform_device *pdev)
 	if (!np)
 		return -ENXIO;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -100,7 +100,7 @@ static const struct of_device_id of_pmem_region_match[] = {
 
 static struct platform_driver of_pmem_region_driver = {
 	.probe = of_pmem_region_probe,
-	.remove_new = of_pmem_region_remove,
+	.remove = of_pmem_region_remove,
 	.driver = {
 		.name = "of_pmem",
 		.of_match_table = of_pmem_region_match,

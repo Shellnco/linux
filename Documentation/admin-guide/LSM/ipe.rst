@@ -95,7 +95,20 @@ languages when these scripts are invoked by passing these program files
 to the interpreter. This is because the way interpreters execute these
 files; the scripts themselves are not evaluated as executable code
 through one of IPE's hooks, but they are merely text files that are read
-(as opposed to compiled executables) [#interpreters]_.
+(as opposed to compiled executables). However, with the introduction of the
+``AT_EXECVE_CHECK`` flag (:doc:`AT_EXECVE_CHECK </userspace-api/check_exec>`),
+interpreters can use it to signal the kernel that a script file will be executed,
+and request the kernel to perform LSM security checks on it.
+
+IPE's EXECUTE operation enforcement differs between compiled executables and
+interpreted scripts: For compiled executables, enforcement is triggered
+automatically by the kernel during ``execve()``, ``execveat()``, ``mmap()``
+and ``mprotect()`` syscalls when loading executable content. For interpreted
+scripts, enforcement requires explicit interpreter integration using
+``execveat()`` with ``AT_EXECVE_CHECK`` flag. Unlike exec syscalls that IPE
+intercepts during the execution process, this mechanism needs the interpreter
+to take the initiative, and existing interpreters won't be automatically
+supported unless the signal call is added.
 
 Threat Model
 ------------
@@ -223,7 +236,10 @@ are signed through the PKCS#7 message format to enforce some level of
 authorization of the policies (prohibiting an attacker from gaining
 unconstrained root, and deploying an "allow all" policy). These
 policies must be signed by a certificate that chains to the
-``SYSTEM_TRUSTED_KEYRING``. With openssl, the policy can be signed by::
+``SYSTEM_TRUSTED_KEYRING``, or to the secondary and/or platform keyrings if
+``CONFIG_IPE_POLICY_SIG_SECONDARY_KEYRING`` and/or
+``CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING`` are enabled, respectively.
+With openssl, the policy can be signed by::
 
    openssl smime -sign \
       -in "$MY_POLICY" \
@@ -266,7 +282,7 @@ in the kernel. This file is write-only and accepts a PKCS#7 signed
 policy. Two checks will always be performed on this policy: First, the
 ``policy_names`` must match with the updated version and the existing
 version. Second the updated policy must have a policy version greater than
-or equal to the currently-running version. This is to prevent rollback attacks.
+the currently-running version. This is to prevent rollback attacks.
 
 The ``delete`` file is used to remove a policy that is no longer needed.
 This file is write-only and accepts a value of ``1`` to delete the policy.
@@ -420,7 +436,7 @@ Field descriptions:
 
 Event Example::
 
-   type=1422 audit(1653425529.927:53): policy_name="boot_verified" policy_version=0.0.0 policy_digest=sha256:820EEA5B40CA42B51F68962354BA083122A20BB846F26765076DD8EED7B8F4DB auid=4294967295 ses=4294967295 lsm=ipe res=1
+   type=1422 audit(1653425529.927:53): policy_name="boot_verified" policy_version=0.0.0 policy_digest=sha256:820EEA5B40CA42B51F68962354BA083122A20BB846F26765076DD8EED7B8F4DB auid=4294967295 ses=4294967295 lsm=ipe res=1 errno=0
    type=1300 audit(1653425529.927:53): arch=c000003e syscall=1 success=yes exit=2567 a0=3 a1=5596fcae1fb0 a2=a07 a3=2 items=0 ppid=184 pid=229 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=4294967295 comm="python3" exe="/usr/bin/python3.10" key=(null)
    type=1327 audit(1653425529.927:53): PROCTITLE proctitle=707974686F6E3300746573742F6D61696E2E7079002D66002E2E
 
@@ -430,24 +446,55 @@ This record will always be emitted in conjunction with a ``AUDITSYSCALL`` record
 
 Field descriptions:
 
-+----------------+------------+-----------+---------------------------------------------------+
-| Field          | Value Type | Optional? | Description of Value                              |
-+================+============+===========+===================================================+
-| policy_name    | string     | No        | The policy_name                                   |
-+----------------+------------+-----------+---------------------------------------------------+
-| policy_version | string     | No        | The policy_version                                |
-+----------------+------------+-----------+---------------------------------------------------+
-| policy_digest  | string     | No        | The policy hash                                   |
-+----------------+------------+-----------+---------------------------------------------------+
-| auid           | integer    | No        | The login user ID                                 |
-+----------------+------------+-----------+---------------------------------------------------+
-| ses            | integer    | No        | The login session ID                              |
-+----------------+------------+-----------+---------------------------------------------------+
-| lsm            | string     | No        | The lsm name associated with the event            |
-+----------------+------------+-----------+---------------------------------------------------+
-| res            | integer    | No        | The result of the audited operation(success/fail) |
-+----------------+------------+-----------+---------------------------------------------------+
++----------------+------------+-----------+-------------------------------------------------------------+
+| Field          | Value Type | Optional? | Description of Value                                        |
++================+============+===========+=============================================================+
+| policy_name    | string     | Yes       | The policy_name                                             |
++----------------+------------+-----------+-------------------------------------------------------------+
+| policy_version | string     | Yes       | The policy_version                                          |
++----------------+------------+-----------+-------------------------------------------------------------+
+| policy_digest  | string     | Yes       | The policy hash                                             |
++----------------+------------+-----------+-------------------------------------------------------------+
+| auid           | integer    | No        | The login user ID                                           |
++----------------+------------+-----------+-------------------------------------------------------------+
+| ses            | integer    | No        | The login session ID                                        |
++----------------+------------+-----------+-------------------------------------------------------------+
+| lsm            | string     | No        | The lsm name associated with the event                      |
++----------------+------------+-----------+-------------------------------------------------------------+
+| res            | integer    | No        | The result of the audited operation(success/fail)           |
++----------------+------------+-----------+-------------------------------------------------------------+
+| errno          | integer    | No        | Error code from policy loading operations (see table below) |
++----------------+------------+-----------+-------------------------------------------------------------+
 
+Policy error codes (errno):
+
+The following table lists the error codes that may appear in the errno field while loading or updating the policy:
+
++----------------+--------------------------------------------------------+
+| Error Code     | Description                                            |
++================+========================================================+
+| 0              | Success                                                |
++----------------+--------------------------------------------------------+
+| -EPERM         | Insufficient permission                                |
++----------------+--------------------------------------------------------+
+| -EEXIST        | Same name policy already deployed                      |
++----------------+--------------------------------------------------------+
+| -EBADMSG       | Policy is invalid                                      |
++----------------+--------------------------------------------------------+
+| -ENOMEM        | Out of memory (OOM)                                    |
++----------------+--------------------------------------------------------+
+| -ERANGE        | Policy version number overflow                         |
++----------------+--------------------------------------------------------+
+| -EINVAL        | Policy version parsing error                           |
++----------------+--------------------------------------------------------+
+| -ENOKEY        | Key used to sign the IPE policy not found in keyring   |
++----------------+--------------------------------------------------------+
+| -EKEYREJECTED  | Policy signature verification failed                   |
++----------------+--------------------------------------------------------+
+| -ESTALE        | Attempting to update an IPE policy with older version  |
++----------------+--------------------------------------------------------+
+| -ENOENT        | Policy was deleted while updating                      |
++----------------+--------------------------------------------------------+
 
 1404 AUDIT_MAC_STATUS
 ^^^^^^^^^^^^^^^^^^^^^
@@ -771,8 +818,6 @@ A:
 -----------
 
 .. [#digest_cache_lsm] https://lore.kernel.org/lkml/20240415142436.2545003-1-roberto.sassu@huaweicloud.com/
-
-.. [#interpreters] There is `some interest in solving this issue <https://lore.kernel.org/lkml/20220321161557.495388-1-mic@digikod.net/>`_.
 
 .. [#devdoc] Please see :doc:`the design docs </security/ipe>` for more on
              this topic.

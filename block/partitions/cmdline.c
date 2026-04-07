@@ -46,7 +46,7 @@ static int parse_subpart(struct cmdline_subpart **subpart, char *partdef)
 
 	*subpart = NULL;
 
-	new_subpart = kzalloc(sizeof(struct cmdline_subpart), GFP_KERNEL);
+	new_subpart = kzalloc_obj(struct cmdline_subpart);
 	if (!new_subpart)
 		return -ENOMEM;
 
@@ -122,7 +122,7 @@ static int parse_parts(struct cmdline_parts **parts, char *bdevdef)
 
 	*parts = NULL;
 
-	newparts = kzalloc(sizeof(struct cmdline_parts), GFP_KERNEL);
+	newparts = kzalloc_obj(struct cmdline_parts);
 	if (!newparts)
 		return -ENOMEM;
 
@@ -236,6 +236,9 @@ static int add_part(int slot, struct cmdline_subpart *subpart,
 
 	put_partition(state, slot, subpart->from >> 9,
 		      subpart->size >> 9);
+
+	if (subpart->flags & PF_RDONLY)
+		state->parts[slot].flags |= ADDPART_FLAG_READONLY;
 
 	info = &state->parts[slot].info;
 

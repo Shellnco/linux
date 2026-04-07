@@ -104,14 +104,19 @@ find_set_type(const char *name, u8 family, u8 revision)
 static bool
 load_settype(const char *name)
 {
+	if (!try_module_get(THIS_MODULE))
+		return false;
+
 	nfnl_unlock(NFNL_SUBSYS_IPSET);
 	pr_debug("try to load ip_set_%s\n", name);
 	if (request_module("ip_set_%s", name) < 0) {
 		pr_warn("Can't find ip_set type %s\n", name);
 		nfnl_lock(NFNL_SUBSYS_IPSET);
+		module_put(THIS_MODULE);
 		return false;
 	}
 	nfnl_lock(NFNL_SUBSYS_IPSET);
+	module_put(THIS_MODULE);
 	return true;
 }
 
@@ -816,7 +821,7 @@ EXPORT_SYMBOL_GPL(ip_set_del);
  *
  */
 ip_set_id_t
-ip_set_get_byname(struct net *net, const char *name, struct ip_set **set)
+ip_set_get_byname(struct net *net, const struct nlattr *name, struct ip_set **set)
 {
 	ip_set_id_t i, index = IPSET_INVALID_ID;
 	struct ip_set *s;
@@ -825,7 +830,7 @@ ip_set_get_byname(struct net *net, const char *name, struct ip_set **set)
 	rcu_read_lock();
 	for (i = 0; i < inst->ip_set_max; i++) {
 		s = rcu_dereference(inst->ip_set_list)[i];
-		if (s && STRNCMP(s->name, name)) {
+		if (s && nla_strcmp(name, s->name) == 0) {
 			__ip_set_get(s);
 			index = i;
 			*set = s;
@@ -1072,7 +1077,7 @@ static int ip_set_create(struct sk_buff *skb, const struct nfnl_info *info,
 	/* First, and without any locks, allocate and initialize
 	 * a normal base set structure.
 	 */
-	set = kzalloc(sizeof(*set), GFP_KERNEL);
+	set = kzalloc_obj(*set);
 	if (!set)
 		return -ENOMEM;
 	spin_lock_init(&set->lock);
@@ -1130,7 +1135,7 @@ static int ip_set_create(struct sk_buff *skb, const struct nfnl_info *info,
 			/* Wraparound */
 			goto cleanup;
 
-		list = kvcalloc(i, sizeof(struct ip_set *), GFP_KERNEL);
+		list = kvzalloc_objs(struct ip_set *, i);
 		if (!list)
 			goto cleanup;
 		/* nfnl mutex is held, both lists are valid */
@@ -2372,7 +2377,7 @@ ip_set_net_init(struct net *net)
 	if (inst->ip_set_max >= IPSET_INVALID_ID)
 		inst->ip_set_max = IPSET_INVALID_ID - 1;
 
-	list = kvcalloc(inst->ip_set_max, sizeof(struct ip_set *), GFP_KERNEL);
+	list = kvzalloc_objs(struct ip_set *, inst->ip_set_max);
 	if (!list)
 		return -ENOMEM;
 	inst->is_deleted = false;

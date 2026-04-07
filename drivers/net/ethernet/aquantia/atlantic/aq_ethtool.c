@@ -15,6 +15,7 @@
 #include "aq_macsec.h"
 #include "aq_main.h"
 
+#include <linux/ethtool.h>
 #include <linux/linkmode.h>
 #include <linux/ptp_clock_kernel.h>
 
@@ -499,20 +500,25 @@ static int aq_ethtool_set_rss(struct net_device *netdev,
 	return err;
 }
 
+static u32 aq_ethtool_get_rx_ring_count(struct net_device *ndev)
+{
+	struct aq_nic_cfg_s *cfg;
+	struct aq_nic_s *aq_nic;
+
+	aq_nic = netdev_priv(ndev);
+	cfg = aq_nic_get_cfg(aq_nic);
+
+	return cfg->vecs;
+}
+
 static int aq_ethtool_get_rxnfc(struct net_device *ndev,
 				struct ethtool_rxnfc *cmd,
 				u32 *rule_locs)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
-	struct aq_nic_cfg_s *cfg;
 	int err = 0;
 
-	cfg = aq_nic_get_cfg(aq_nic);
-
 	switch (cmd->cmd) {
-	case ETHTOOL_GRXRINGS:
-		cmd->data = cfg->vecs;
-		break;
 	case ETHTOOL_GRXCLSRLCNT:
 		cmd->rule_cnt = aq_get_rxnfc_count_all_rules(aq_nic);
 		break;
@@ -977,6 +983,76 @@ static int aq_ethtool_set_phy_tunable(struct net_device *ndev,
 	return err;
 }
 
+static int aq_ethtool_get_module_info(struct net_device *ndev,
+				      struct ethtool_modinfo *modinfo)
+{
+	struct aq_nic_s *aq_nic = netdev_priv(ndev);
+	u8 compliance_val, dom_type;
+	int err;
+
+	/* Module EEPROM is only supported for controllers with external PHY */
+	if (aq_nic->aq_nic_cfg.aq_hw_caps->media_type != AQ_HW_MEDIA_TYPE_FIBRE ||
+	    !aq_nic->aq_hw_ops->hw_read_module_eeprom)
+		return -EOPNOTSUPP;
+
+	err = aq_nic->aq_hw_ops->hw_read_module_eeprom(aq_nic->aq_hw,
+		SFF_8472_ID_ADDR, SFF_8472_COMP_ADDR, 1, &compliance_val);
+	if (err)
+		return err;
+
+	err = aq_nic->aq_hw_ops->hw_read_module_eeprom(aq_nic->aq_hw,
+		SFF_8472_ID_ADDR, SFF_8472_DOM_TYPE_ADDR, 1, &dom_type);
+	if (err)
+		return err;
+
+	if (dom_type & SFF_8472_ADDRESS_CHANGE_REQ_MASK || compliance_val == 0x00) {
+		modinfo->type = ETH_MODULE_SFF_8079;
+		modinfo->eeprom_len = ETH_MODULE_SFF_8079_LEN;
+	} else {
+		modinfo->type = ETH_MODULE_SFF_8472;
+		modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
+	}
+	return 0;
+}
+
+static int aq_ethtool_get_module_eeprom(struct net_device *ndev,
+					struct ethtool_eeprom *ee, unsigned char *data)
+{
+	struct aq_nic_s *aq_nic = netdev_priv(ndev);
+	unsigned int first, last, len;
+	int err;
+
+	if (!aq_nic->aq_hw_ops->hw_read_module_eeprom)
+		return -EOPNOTSUPP;
+
+	first = ee->offset;
+	last = ee->offset + ee->len;
+
+	if (first < ETH_MODULE_SFF_8079_LEN) {
+		len = min(last, ETH_MODULE_SFF_8079_LEN);
+		len -= first;
+
+		err = aq_nic->aq_hw_ops->hw_read_module_eeprom(aq_nic->aq_hw,
+			SFF_8472_ID_ADDR, first, len, data);
+		if (err)
+			return err;
+
+		first += len;
+		data += len;
+	}
+	if (first < ETH_MODULE_SFF_8472_LEN && last > ETH_MODULE_SFF_8079_LEN) {
+		len = min(last, ETH_MODULE_SFF_8472_LEN);
+		len -= first;
+		first -= ETH_MODULE_SFF_8079_LEN;
+
+		err = aq_nic->aq_hw_ops->hw_read_module_eeprom(aq_nic->aq_hw,
+			SFF_8472_DIAGNOSTICS_ADDR, first, len, data);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
 const struct ethtool_ops aq_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES,
@@ -1001,6 +1077,7 @@ const struct ethtool_ops aq_ethtool_ops = {
 	.set_rxfh            = aq_ethtool_set_rss,
 	.get_rxnfc           = aq_ethtool_get_rxnfc,
 	.set_rxnfc           = aq_ethtool_set_rxnfc,
+	.get_rx_ring_count   = aq_ethtool_get_rx_ring_count,
 	.get_msglevel        = aq_get_msg_level,
 	.set_msglevel        = aq_set_msg_level,
 	.get_sset_count      = aq_ethtool_get_sset_count,
@@ -1014,4 +1091,6 @@ const struct ethtool_ops aq_ethtool_ops = {
 	.get_ts_info         = aq_ethtool_get_ts_info,
 	.get_phy_tunable     = aq_ethtool_get_phy_tunable,
 	.set_phy_tunable     = aq_ethtool_set_phy_tunable,
+	.get_module_info     = aq_ethtool_get_module_info,
+	.get_module_eeprom   = aq_ethtool_get_module_eeprom,
 };

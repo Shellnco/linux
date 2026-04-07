@@ -434,7 +434,7 @@ static void devlink_reload_reinit_sanity_check(struct devlink *devlink)
 	WARN_ON(!list_empty(&devlink->trap_list));
 	WARN_ON(!list_empty(&devlink->dpipe_table_list));
 	WARN_ON(!list_empty(&devlink->sb_list));
-	WARN_ON(!list_empty(&devlink->rate_list));
+	WARN_ON(devlink_rates_check(devlink, NULL, NULL));
 	WARN_ON(!list_empty(&devlink->linecard_list));
 	WARN_ON(!xa_empty(&devlink->ports));
 }
@@ -531,10 +531,8 @@ int devlink_nl_reload_doit(struct sk_buff *skb, struct genl_info *info)
 		return err;
 	}
 
-	if (info->attrs[DEVLINK_ATTR_RELOAD_ACTION])
-		action = nla_get_u8(info->attrs[DEVLINK_ATTR_RELOAD_ACTION]);
-	else
-		action = DEVLINK_RELOAD_ACTION_DRIVER_REINIT;
+	action = nla_get_u8_default(info->attrs[DEVLINK_ATTR_RELOAD_ACTION],
+				    DEVLINK_RELOAD_ACTION_DRIVER_REINIT);
 
 	if (!devlink_reload_action_is_supported(devlink, action)) {
 		NL_SET_ERR_MSG(info->extack, "Requested reload action is not supported by the driver");
@@ -715,10 +713,11 @@ int devlink_nl_eswitch_set_doit(struct sk_buff *skb, struct genl_info *info)
 	if (info->attrs[DEVLINK_ATTR_ESWITCH_MODE]) {
 		if (!ops->eswitch_mode_set)
 			return -EOPNOTSUPP;
-		mode = nla_get_u16(info->attrs[DEVLINK_ATTR_ESWITCH_MODE]);
-		err = devlink_rate_nodes_check(devlink, mode, info->extack);
+		err = devlink_rates_check(devlink, devlink_rate_is_node,
+					  info->extack);
 		if (err)
 			return err;
+		mode = nla_get_u16(info->attrs[DEVLINK_ATTR_ESWITCH_MODE]);
 		err = ops->eswitch_mode_set(devlink, mode, info->extack);
 		if (err)
 			return err;
@@ -777,7 +776,7 @@ static int devlink_info_version_put(struct devlink_info_req *req, int attr,
 		req->version_cb(version_name, version_type,
 				req->version_cb_priv);
 
-	if (!req->msg)
+	if (!req->msg || !*version_value)
 		return 0;
 
 	nest = nla_nest_start_noflag(req->msg, attr);
@@ -971,14 +970,14 @@ static int devlink_nl_flash_update_fill(struct sk_buff *msg,
 	    nla_put_string(msg, DEVLINK_ATTR_FLASH_UPDATE_COMPONENT,
 			   params->component))
 		goto nla_put_failure;
-	if (nla_put_u64_64bit(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_DONE,
-			      params->done, DEVLINK_ATTR_PAD))
+	if (devlink_nl_put_u64(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_DONE,
+			       params->done))
 		goto nla_put_failure;
-	if (nla_put_u64_64bit(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_TOTAL,
-			      params->total, DEVLINK_ATTR_PAD))
+	if (devlink_nl_put_u64(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_TOTAL,
+			       params->total))
 		goto nla_put_failure;
-	if (nla_put_u64_64bit(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_TIMEOUT,
-			      params->timeout, DEVLINK_ATTR_PAD))
+	if (devlink_nl_put_u64(msg, DEVLINK_ATTR_FLASH_UPDATE_STATUS_TIMEOUT,
+			       params->timeout))
 		goto nla_put_failure;
 
 out:

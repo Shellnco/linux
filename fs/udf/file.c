@@ -28,6 +28,7 @@
 #include <linux/string.h> /* memset */
 #include <linux/capability.h>
 #include <linux/errno.h>
+#include <linux/filelock.h>
 #include <linux/pagemap.h>
 #include <linux/uio.h>
 
@@ -69,7 +70,7 @@ static vm_fault_t udf_page_mkwrite(struct vm_fault *vmf)
 		goto out_unlock;
 	}
 
-	block_commit_write(&folio->page, 0, end);
+	block_commit_write(folio, 0, end);
 out_dirty:
 	folio_mark_dirty(folio);
 	folio_wait_stable(folio);
@@ -208,6 +209,7 @@ const struct file_operations udf_file_operations = {
 	.splice_read		= filemap_splice_read,
 	.splice_write		= iter_file_splice_write,
 	.llseek			= generic_file_llseek,
+	.setlease		= generic_setlease,
 };
 
 static int udf_setattr(struct mnt_idmap *idmap, struct dentry *dentry,

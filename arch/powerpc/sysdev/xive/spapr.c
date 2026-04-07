@@ -7,6 +7,7 @@
 
 #include <linux/types.h>
 #include <linux/irq.h>
+#include <linux/seq_file.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -51,7 +52,7 @@ static int __init xive_irq_bitmap_add(int base, int count)
 {
 	struct xive_irq_bitmap *xibm;
 
-	xibm = kzalloc(sizeof(*xibm), GFP_KERNEL);
+	xibm = kzalloc_obj(*xibm);
 	if (!xibm)
 		return -ENOMEM;
 

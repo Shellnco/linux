@@ -235,12 +235,12 @@ asmlinkage long sys_oabi_fcntl64(unsigned int fd, unsigned int cmd,
 				 unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
-	struct fd f = fdget_raw(fd);
+	CLASS(fd_raw, f)(fd);
 	struct flock64 flock;
-	long err = -EBADF;
+	long err;
 
-	if (!fd_file(f))
-		goto out;
+	if (fd_empty(f))
+		return -EBADF;
 
 	switch (cmd) {
 	case F_GETLK64:
@@ -271,8 +271,6 @@ asmlinkage long sys_oabi_fcntl64(unsigned int fd, unsigned int cmd,
 		err = sys_fcntl64(fd, cmd, arg);
 		break;
 	}
-	fdput(f);
-out:
 	return err;
 }
 
@@ -351,7 +349,7 @@ asmlinkage long sys_oabi_semtimedop(int semid,
 		return -E2BIG;
 	if (nsops < 1 || nsops > SEMOPM)
 		return -EINVAL;
-	sops = kvmalloc_array(nsops, sizeof(*sops), GFP_KERNEL);
+	sops = kvmalloc_objs(*sops, nsops);
 	if (!sops)
 		return -ENOMEM;
 	err = 0;

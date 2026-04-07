@@ -117,7 +117,7 @@ static bool rcu_read_lock_held_common(bool *ret)
 	return false;
 }
 
-int rcu_read_lock_sched_held(void)
+int notrace rcu_read_lock_sched_held(void)
 {
 	bool ret;
 
@@ -342,7 +342,7 @@ EXPORT_SYMBOL_GPL(debug_lockdep_rcu_enabled);
  * Note that rcu_read_lock() is disallowed if the CPU is either idle or
  * offline from an RCU perspective, so check for those as well.
  */
-int rcu_read_lock_held(void)
+int notrace rcu_read_lock_held(void)
 {
 	bool ret;
 
@@ -367,7 +367,7 @@ EXPORT_SYMBOL_GPL(rcu_read_lock_held);
  * Note that rcu_read_lock_bh() is disallowed if the CPU is either idle or
  * offline from an RCU perspective, so check for those as well.
  */
-int rcu_read_lock_bh_held(void)
+int notrace rcu_read_lock_bh_held(void)
 {
 	bool ret;
 
@@ -377,7 +377,7 @@ int rcu_read_lock_bh_held(void)
 }
 EXPORT_SYMBOL_GPL(rcu_read_lock_bh_held);
 
-int rcu_read_lock_any_held(void)
+int notrace rcu_read_lock_any_held(void)
 {
 	bool ret;
 
@@ -527,12 +527,12 @@ EXPORT_SYMBOL_GPL(do_trace_rcu_torture_read);
 
 #if IS_ENABLED(CONFIG_RCU_TORTURE_TEST) || IS_MODULE(CONFIG_RCU_TORTURE_TEST) || IS_ENABLED(CONFIG_LOCK_TORTURE_TEST) || IS_MODULE(CONFIG_LOCK_TORTURE_TEST)
 /* Get rcutorture access to sched_setaffinity(). */
-long torture_sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+long torture_sched_setaffinity(pid_t pid, const struct cpumask *in_mask, bool dowarn)
 {
 	int ret;
 
 	ret = sched_setaffinity(pid, in_mask);
-	WARN_ONCE(ret, "%s: sched_setaffinity(%d) returned %d\n", __func__, pid, ret);
+	WARN_ONCE(dowarn && ret, "%s: sched_setaffinity(%d) returned %d\n", __func__, pid, ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(torture_sched_setaffinity);
@@ -614,7 +614,7 @@ static void early_boot_test_call_rcu(void)
 	call_rcu(&head, test_callback);
 	early_srcu_cookie = start_poll_synchronize_srcu(&early_srcu);
 	call_srcu(&early_srcu, &shead, test_callback);
-	rhp = kmalloc(sizeof(*rhp), GFP_KERNEL);
+	rhp = kmalloc_obj(*rhp);
 	if (!WARN_ON_ONCE(!rhp))
 		kfree_rcu(rhp, rh);
 }

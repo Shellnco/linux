@@ -125,7 +125,7 @@ static const struct pci_epf_mhi_ep_info sm8450_info = {
 
 static struct pci_epf_header sa8775p_header = {
 	.vendorid = PCI_VENDOR_ID_QCOM,
-	.deviceid = 0x0306,               /* FIXME: Update deviceid for sa8775p EP */
+	.deviceid = 0x0116,
 	.baseclass_code = PCI_CLASS_OTHERS,
 	.interrupt_pin = PCI_INTERRUPT_INTA,
 };
@@ -525,7 +525,7 @@ static int pci_epf_mhi_edma_read_async(struct mhi_ep_cntrl *mhi_cntrl,
 		goto err_unmap;
 	}
 
-	transfer = kzalloc(sizeof(*transfer), GFP_KERNEL);
+	transfer = kzalloc_obj(*transfer);
 	if (!transfer) {
 		ret = -ENOMEM;
 		goto err_unmap;
@@ -604,7 +604,7 @@ static int pci_epf_mhi_edma_write_async(struct mhi_ep_cntrl *mhi_cntrl,
 		goto err_unmap;
 	}
 
-	transfer = kzalloc(sizeof(*transfer), GFP_KERNEL);
+	transfer = kzalloc_obj(*transfer);
 	if (!transfer) {
 		ret = -ENOMEM;
 		goto err_unmap;
@@ -686,7 +686,7 @@ static int pci_epf_mhi_dma_init(struct pci_epf_mhi *epf_mhi)
 		goto err_release_tx;
 	}
 
-	epf_mhi->dma_wq = alloc_workqueue("pci_epf_mhi_dma_wq", 0, 0);
+	epf_mhi->dma_wq = alloc_workqueue("pci_epf_mhi_dma_wq", WQ_PERCPU, 0);
 	if (!epf_mhi->dma_wq) {
 		ret = -ENOMEM;
 		goto err_release_rx;
@@ -867,12 +867,18 @@ static int pci_epf_mhi_bind(struct pci_epf *epf)
 {
 	struct pci_epf_mhi *epf_mhi = epf_get_drvdata(epf);
 	struct pci_epc *epc = epf->epc;
+	struct device *dev = &epf->dev;
 	struct platform_device *pdev = to_platform_device(epc->dev.parent);
 	struct resource *res;
 	int ret;
 
 	/* Get MMIO base address from Endpoint controller */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mmio");
+	if (!res) {
+		dev_err(dev, "Failed to get \"mmio\" resource\n");
+		return -ENODEV;
+	}
+
 	epf_mhi->mmio_phys = res->start;
 	epf_mhi->mmio_size = resource_size(res);
 

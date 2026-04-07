@@ -92,6 +92,18 @@ GEM Atomic Helper Reference
 .. kernel-doc:: drivers/gpu/drm/drm_gem_atomic_helper.c
    :export:
 
+VBLANK Helper Reference
+-----------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_vblank_helper.c
+   :doc: overview
+
+.. kernel-doc:: include/drm/drm_vblank_helper.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_vblank_helper.c
+   :export:
+
 Simple KMS Helper Reference
 ===========================
 
@@ -109,15 +121,6 @@ fbdev Helper Functions Reference
 
 .. kernel-doc:: drivers/gpu/drm/drm_fb_helper.c
    :doc: fbdev helpers
-
-.. kernel-doc:: drivers/gpu/drm/drm_fbdev_dma.c
-   :export:
-
-.. kernel-doc:: drivers/gpu/drm/drm_fbdev_shmem.c
-   :export:
-
-.. kernel-doc:: drivers/gpu/drm/drm_fbdev_ttm.c
-   :export:
 
 .. kernel-doc:: include/drm/drm_fb_helper.h
    :internal:
@@ -230,6 +233,9 @@ Panel Helper Reference
 .. kernel-doc:: drivers/gpu/drm/drm_panel_orientation_quirks.c
    :export:
 
+.. kernel-doc:: drivers/gpu/drm/drm_panel_backlight_quirks.c
+   :export:
+
 Panel Self Refresh Helper Reference
 ===================================
 
@@ -237,6 +243,21 @@ Panel Self Refresh Helper Reference
    :doc: overview
 
 .. kernel-doc:: drivers/gpu/drm/drm_self_refresh_helper.c
+   :export:
+
+HDMI Atomic State Helpers
+=========================
+
+Overview
+--------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_hdmi_state_helper.c
+   :doc: hdmi helpers
+
+Functions Reference
+-------------------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_hdmi_state_helper.c
    :export:
 
 HDCP Helper Functions Reference

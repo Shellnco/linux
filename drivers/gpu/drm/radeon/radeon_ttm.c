@@ -219,8 +219,7 @@ static int radeon_bo_move(struct ttm_buffer_object *bo, bool evict,
 	if (old_mem->mem_type == TTM_PL_TT &&
 	    new_mem->mem_type == TTM_PL_SYSTEM) {
 		radeon_ttm_tt_unbind(bo->bdev, bo->ttm);
-		ttm_resource_free(bo, &bo->resource);
-		ttm_bo_assign_mem(bo, new_mem);
+		ttm_bo_move_null(bo, new_mem);
 		goto out;
 	}
 	if (rdev->ring[radeon_copy_ring_index(rdev)].ready &&
@@ -493,7 +492,7 @@ static struct ttm_tt *radeon_ttm_tt_create(struct ttm_buffer_object *bo,
 #endif
 	rbo = container_of(bo, struct radeon_bo, tbo);
 
-	gtt = kzalloc(sizeof(struct radeon_ttm_tt), GFP_KERNEL);
+	gtt = kzalloc_obj(struct radeon_ttm_tt);
 	if (gtt == NULL) {
 		return NULL;
 	}
@@ -534,7 +533,7 @@ static int radeon_ttm_tt_populate(struct ttm_device *bdev,
 	bool slave = !!(ttm->page_flags & TTM_TT_FLAG_EXTERNAL);
 
 	if (gtt && gtt->userptr) {
-		ttm->sg = kzalloc(sizeof(struct sg_table), GFP_KERNEL);
+		ttm->sg = kzalloc_obj(struct sg_table);
 		if (!ttm->sg)
 			return -ENOMEM;
 
@@ -684,8 +683,10 @@ int radeon_ttm_init(struct radeon_device *rdev)
 	r = ttm_device_init(&rdev->mman.bdev, &radeon_bo_driver, rdev->dev,
 			       rdev_to_drm(rdev)->anon_inode->i_mapping,
 			       rdev_to_drm(rdev)->vma_offset_manager,
-			       rdev->need_swiotlb,
-			       dma_addressing_limited(&rdev->pdev->dev));
+			       (rdev->need_swiotlb ?
+				TTM_ALLOCATION_POOL_USE_DMA_ALLOC : 0) |
+			       (dma_addressing_limited(&rdev->pdev->dev) ?
+				TTM_ALLOCATION_POOL_USE_DMA32 : 0));
 	if (r) {
 		DRM_ERROR("failed initializing buffer object driver(%d).\n", r);
 		return r;

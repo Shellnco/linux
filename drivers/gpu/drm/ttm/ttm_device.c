@@ -28,14 +28,17 @@
 #define pr_fmt(fmt) "[TTM DEVICE] " fmt
 
 #include <linux/debugfs.h>
+#include <linux/export.h>
 #include <linux/mm.h>
 
+#include <drm/ttm/ttm_allocation.h>
 #include <drm/ttm/ttm_bo.h>
 #include <drm/ttm/ttm_device.h>
 #include <drm/ttm/ttm_tt.h>
 #include <drm/ttm/ttm_placement.h>
 
 #include "ttm_module.h"
+#include "ttm_bo_internal.h"
 
 /*
  * ttm_global_mutex - protecting the global state
@@ -123,6 +126,25 @@ out:
 	return ret;
 }
 
+/**
+ * ttm_device_prepare_hibernation - move GTT BOs to shmem for hibernation.
+ *
+ * @bdev: A pointer to a struct ttm_device to prepare hibernation for.
+ *
+ * Return: 0 on success, negative number on failure.
+ */
+int ttm_device_prepare_hibernation(struct ttm_device *bdev)
+{
+	struct ttm_operation_ctx ctx = { };
+	int ret;
+
+	do {
+		ret = ttm_device_swapout(bdev, &ctx, GFP_KERNEL);
+	} while (ret > 0);
+	return ret;
+}
+EXPORT_SYMBOL(ttm_device_prepare_hibernation);
+
 /*
  * A buffer object shrink method that tries to swap out the first
  * buffer object on the global::swap_lru list.
@@ -174,8 +196,7 @@ EXPORT_SYMBOL(ttm_device_swapout);
  * @dev: The core kernel device pointer for DMA mappings and allocations.
  * @mapping: The address space to use for this bo.
  * @vma_manager: A pointer to a vma manager.
- * @use_dma_alloc: If coherent DMA allocation API should be used.
- * @use_dma32: If we should use GFP_DMA32 for device memory allocations.
+ * @alloc_flags: TTM_ALLOCATION_* flags.
  *
  * Initializes a struct ttm_device:
  * Returns:
@@ -184,7 +205,7 @@ EXPORT_SYMBOL(ttm_device_swapout);
 int ttm_device_init(struct ttm_device *bdev, const struct ttm_device_funcs *funcs,
 		    struct device *dev, struct address_space *mapping,
 		    struct drm_vma_offset_manager *vma_manager,
-		    bool use_dma_alloc, bool use_dma32)
+		    unsigned int alloc_flags)
 {
 	struct ttm_global *glob = &ttm_glob;
 	int ret, nid;
@@ -203,6 +224,7 @@ int ttm_device_init(struct ttm_device *bdev, const struct ttm_device_funcs *func
 		return -ENOMEM;
 	}
 
+	bdev->alloc_flags = alloc_flags;
 	bdev->funcs = funcs;
 
 	ttm_sys_man_init(bdev);
@@ -212,11 +234,11 @@ int ttm_device_init(struct ttm_device *bdev, const struct ttm_device_funcs *func
 	else
 		nid = NUMA_NO_NODE;
 
-	ttm_pool_init(&bdev->pool, dev, nid, use_dma_alloc, use_dma32);
+	ttm_pool_init(&bdev->pool, dev, nid, alloc_flags);
 
 	bdev->vma_manager = vma_manager;
 	spin_lock_init(&bdev->lru_lock);
-	INIT_LIST_HEAD(&bdev->pinned);
+	INIT_LIST_HEAD(&bdev->unevictable);
 	bdev->dev_mapping = mapping;
 	mutex_lock(&ttm_global_mutex);
 	list_add_tail(&bdev->device_list, &glob->device_list);
@@ -283,7 +305,7 @@ void ttm_device_clear_dma_mappings(struct ttm_device *bdev)
 	struct ttm_resource_manager *man;
 	unsigned int i, j;
 
-	ttm_device_clear_lru_dma_mappings(bdev, &bdev->pinned);
+	ttm_device_clear_lru_dma_mappings(bdev, &bdev->unevictable);
 
 	for (i = TTM_PL_SYSTEM; i < TTM_NUM_MEM_TYPES; ++i) {
 		man = ttm_manager_type(bdev, i);

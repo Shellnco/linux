@@ -92,7 +92,7 @@ static int c4iw_alloc_ucontext(struct ib_ucontext *ucontext,
 		pr_err_once("Warning - downlevel libcxgb4 (non-fatal), device status page disabled\n");
 		rhp->rdev.flags |= T4_STATUS_PAGE_DISABLED;
 	} else {
-		mm = kmalloc(sizeof(*mm), GFP_KERNEL);
+		mm = kmalloc_obj(*mm);
 		if (!mm) {
 			ret = -ENOMEM;
 			goto err;
@@ -473,6 +473,7 @@ static const struct ib_device_ops c4iw_dev_ops = {
 	.fill_res_cq_entry = c4iw_fill_res_cq_entry,
 	.fill_res_cm_id_entry = c4iw_fill_res_cm_id_entry,
 	.fill_res_mr_entry = c4iw_fill_res_mr_entry,
+	.fill_res_qp_entry = c4iw_fill_res_qp_entry,
 	.get_dev_fw_str = get_dev_fw_str,
 	.get_dma_mr = c4iw_get_dma_mr,
 	.get_hw_stats = c4iw_get_mib,

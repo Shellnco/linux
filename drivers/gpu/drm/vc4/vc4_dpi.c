@@ -17,6 +17,7 @@
 #include <drm/drm_edid.h>
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_simple_kms_helper.h>
 #include <linux/clk.h>
@@ -395,7 +396,7 @@ static void vc4_dpi_dev_remove(struct platform_device *pdev)
 
 struct platform_driver vc4_dpi_driver = {
 	.probe = vc4_dpi_dev_probe,
-	.remove_new = vc4_dpi_dev_remove,
+	.remove = vc4_dpi_dev_remove,
 	.driver = {
 		.name = "vc4_dpi",
 		.of_match_table = vc4_dpi_dt_match,

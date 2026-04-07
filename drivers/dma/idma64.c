@@ -196,11 +196,11 @@ static struct idma64_desc *idma64_alloc_desc(unsigned int ndesc)
 {
 	struct idma64_desc *desc;
 
-	desc = kzalloc(sizeof(*desc), GFP_NOWAIT);
+	desc = kzalloc_obj(*desc, GFP_NOWAIT);
 	if (!desc)
 		return NULL;
 
-	desc->hw = kcalloc(ndesc, sizeof(*desc->hw), GFP_NOWAIT);
+	desc->hw = kzalloc_objs(*desc->hw, ndesc, GFP_NOWAIT);
 	if (!desc->hw) {
 		kfree(desc);
 		return NULL;
@@ -693,7 +693,7 @@ static const struct dev_pm_ops idma64_dev_pm_ops = {
 
 static struct platform_driver idma64_platform_driver = {
 	.probe		= idma64_platform_probe,
-	.remove_new	= idma64_platform_remove,
+	.remove		= idma64_platform_remove,
 	.driver = {
 		.name	= LPSS_IDMA64_DRIVER_NAME,
 		.pm	= &idma64_dev_pm_ops,

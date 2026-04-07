@@ -192,7 +192,7 @@ static int qm_sqc_dump(struct hisi_qm *qm, char *s, char *name)
 
 	down_read(&qm->qps_lock);
 	if (qm->sqc) {
-		memcpy(&sqc, qm->sqc + qp_id * sizeof(struct qm_sqc), sizeof(struct qm_sqc));
+		memcpy(&sqc, qm->sqc + qp_id, sizeof(struct qm_sqc));
 		sqc.base_h = cpu_to_le32(QM_XQC_ADDR_MASK);
 		sqc.base_l = cpu_to_le32(QM_XQC_ADDR_MASK);
 		dump_show(qm, &sqc, sizeof(struct qm_sqc), "SOFT SQC");
@@ -229,7 +229,7 @@ static int qm_cqc_dump(struct hisi_qm *qm, char *s, char *name)
 
 	down_read(&qm->qps_lock);
 	if (qm->cqc) {
-		memcpy(&cqc, qm->cqc + qp_id * sizeof(struct qm_cqc), sizeof(struct qm_cqc));
+		memcpy(&cqc, qm->cqc + qp_id, sizeof(struct qm_cqc));
 		cqc.base_h = cpu_to_le32(QM_XQC_ADDR_MASK);
 		cqc.base_l = cpu_to_le32(QM_XQC_ADDR_MASK);
 		dump_show(qm, &cqc, sizeof(struct qm_cqc), "SOFT CQC");
@@ -838,7 +838,7 @@ static struct dfx_diff_registers *dfx_regs_init(struct hisi_qm *qm,
 	u32 j, base_offset;
 	int i;
 
-	diff_regs = kcalloc(reg_len, sizeof(*diff_regs), GFP_KERNEL);
+	diff_regs = kzalloc_objs(*diff_regs, reg_len);
 	if (!diff_regs)
 		return ERR_PTR(-ENOMEM);
 
@@ -888,6 +888,7 @@ static int qm_diff_regs_init(struct hisi_qm *qm,
 		dfx_regs_uninit(qm, qm->debug.qm_diff_regs, ARRAY_SIZE(qm_diff_regs));
 		ret = PTR_ERR(qm->debug.acc_diff_regs);
 		qm->debug.acc_diff_regs = NULL;
+		qm->debug.qm_diff_regs = NULL;
 		return ret;
 	}
 

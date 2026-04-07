@@ -18,8 +18,8 @@ s32 BPF_STRUCT_OPS(select_cpu_dispatch_dbl_dsp_select_cpu, struct task_struct *p
 		   s32 prev_cpu, u64 wake_flags)
 {
 	/* Dispatching twice in a row is disallowed. */
-	scx_bpf_dispatch(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
-	scx_bpf_dispatch(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
+	scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
+	scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
 
 	return prev_cpu;
 }
@@ -31,8 +31,8 @@ void BPF_STRUCT_OPS(select_cpu_dispatch_dbl_dsp_exit, struct scx_exit_info *ei)
 
 SEC(".struct_ops.link")
 struct sched_ext_ops select_cpu_dispatch_dbl_dsp_ops = {
-	.select_cpu		= select_cpu_dispatch_dbl_dsp_select_cpu,
-	.exit			= select_cpu_dispatch_dbl_dsp_exit,
+	.select_cpu		= (void *) select_cpu_dispatch_dbl_dsp_select_cpu,
+	.exit			= (void *) select_cpu_dispatch_dbl_dsp_exit,
 	.name			= "select_cpu_dispatch_dbl_dsp",
 	.timeout_ms		= 1000U,
 };

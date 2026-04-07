@@ -697,7 +697,6 @@ static int uniphier_spi_probe(struct platform_device *pdev)
 	host->max_speed_hz = DIV_ROUND_UP(clk_rate, SSI_MIN_CLK_DIVIDER);
 	host->min_speed_hz = DIV_ROUND_UP(clk_rate, SSI_MAX_CLK_DIVIDER);
 	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH | SPI_LSB_FIRST;
-	host->dev.of_node = pdev->dev.of_node;
 	host->bus_num = pdev->id;
 	host->bits_per_word_mask = SPI_BPW_RANGE_MASK(1, 32);
 
@@ -796,7 +795,7 @@ MODULE_DEVICE_TABLE(of, uniphier_spi_match);
 
 static struct platform_driver uniphier_spi_driver = {
 	.probe = uniphier_spi_probe,
-	.remove_new = uniphier_spi_remove,
+	.remove = uniphier_spi_remove,
 	.driver = {
 		.name = "uniphier-spi",
 		.of_match_table = uniphier_spi_match,

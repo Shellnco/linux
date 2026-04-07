@@ -218,7 +218,7 @@ static int spi_ppc4xx_setup(struct spi_device *spi)
 	}
 
 	if (cs == NULL) {
-		cs = kzalloc(sizeof(*cs), GFP_KERNEL);
+		cs = kzalloc_obj(*cs);
 		if (!cs)
 			return -ENOMEM;
 		spi->controller_state = cs;
@@ -484,7 +484,7 @@ MODULE_DEVICE_TABLE(of, spi_ppc4xx_of_match);
 
 static struct platform_driver spi_ppc4xx_of_driver = {
 	.probe = spi_ppc4xx_of_probe,
-	.remove_new = spi_ppc4xx_of_remove,
+	.remove = spi_ppc4xx_of_remove,
 	.driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = spi_ppc4xx_of_match,

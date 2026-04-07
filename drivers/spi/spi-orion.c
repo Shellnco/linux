@@ -780,7 +780,6 @@ static int orion_spi_probe(struct platform_device *pdev)
 	if (status < 0)
 		goto out_rel_pm;
 
-	host->dev.of_node = pdev->dev.of_node;
 	status = spi_register_controller(host);
 	if (status < 0)
 		goto out_rel_pm;
@@ -846,7 +845,7 @@ static struct platform_driver orion_spi_driver = {
 		.of_match_table = of_match_ptr(orion_spi_of_match_table),
 	},
 	.probe		= orion_spi_probe,
-	.remove_new	= orion_spi_remove,
+	.remove		= orion_spi_remove,
 };
 
 module_platform_driver(orion_spi_driver);

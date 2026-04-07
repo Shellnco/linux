@@ -224,7 +224,7 @@ static unsigned long aio_nr;		/* current system wide number of aio requests */
 static unsigned long aio_max_nr = 0x10000; /* system wide maximum number of aio requests */
 /*----end sysctl variables---*/
 #ifdef CONFIG_SYSCTL
-static struct ctl_table aio_sysctls[] = {
+static const struct ctl_table aio_sysctls[] = {
 	{
 		.procname	= "aio-nr",
 		.data		= &aio_nr,
@@ -392,15 +392,15 @@ static const struct vm_operations_struct aio_ring_vm_ops = {
 #endif
 };
 
-static int aio_ring_mmap(struct file *file, struct vm_area_struct *vma)
+static int aio_ring_mmap_prepare(struct vm_area_desc *desc)
 {
-	vm_flags_set(vma, VM_DONTEXPAND);
-	vma->vm_ops = &aio_ring_vm_ops;
+	vma_desc_set_flags(desc, VMA_DONTEXPAND_BIT);
+	desc->vm_ops = &aio_ring_vm_ops;
 	return 0;
 }
 
 static const struct file_operations aio_ring_fops = {
-	.mmap = aio_ring_mmap,
+	.mmap_prepare = aio_ring_mmap_prepare,
 };
 
 #if IS_ENABLED(CONFIG_MIGRATION)
@@ -445,7 +445,7 @@ static int aio_migrate_folio(struct address_space *mapping, struct folio *dst,
 	folio_get(dst);
 
 	rc = folio_migrate_mapping(mapping, dst, src, 1);
-	if (rc != MIGRATEPAGE_SUCCESS) {
+	if (rc) {
 		folio_put(dst);
 		goto out_unlock;
 	}
@@ -510,8 +510,7 @@ static int aio_setup_ring(struct kioctx *ctx, unsigned int nr_events)
 
 	ctx->ring_folios = ctx->internal_folios;
 	if (nr_pages > AIO_RING_PAGES) {
-		ctx->ring_folios = kcalloc(nr_pages, sizeof(struct folio *),
-					   GFP_KERNEL);
+		ctx->ring_folios = kzalloc_objs(struct folio *, nr_pages);
 		if (!ctx->ring_folios) {
 			put_aio_ring_file(ctx);
 			return -ENOMEM;
@@ -636,7 +635,7 @@ static void free_ioctx_reqs(struct percpu_ref *ref)
 
 	/* Synchronize against RCU protected table->table[] dereferences */
 	INIT_RCU_WORK(&ctx->free_rwork, free_ioctx);
-	queue_rcu_work(system_wq, &ctx->free_rwork);
+	queue_rcu_work(system_percpu_wq, &ctx->free_rwork);
 }
 
 /*
@@ -693,7 +692,7 @@ static int ioctx_add_table(struct kioctx *ctx, struct mm_struct *mm)
 		new_nr = (table ? table->nr : 1) * 4;
 		spin_unlock(&mm->ioctx_lock);
 
-		table = kzalloc(struct_size(table, table, new_nr), GFP_KERNEL);
+		table = kzalloc_flex(*table, table, new_nr);
 		if (!table)
 			return -ENOMEM;
 
@@ -1335,7 +1334,7 @@ static long read_events(struct kioctx *ctx, long min_nr, long nr,
 	if (until == 0 || ret < 0 || ret >= min_nr)
 		return ret;
 
-	hrtimer_init_sleeper_on_stack(&t, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_setup_sleeper_on_stack(&t, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	if (until != KTIME_MAX) {
 		hrtimer_set_expires_range_ns(&t.timer, until, current->timer_slack_ns);
 		hrtimer_sleeper_start_expires(&t, HRTIMER_MODE_REL);
@@ -1511,6 +1510,7 @@ static int aio_prep_rw(struct kiocb *req, const struct iocb *iocb, int rw_type)
 {
 	int ret;
 
+	req->ki_write_stream = 0;
 	req->ki_complete = aio_complete_rw;
 	req->private = NULL;
 	req->ki_pos = iocb->aio_offset;
@@ -1639,10 +1639,10 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 static void aio_fsync_work(struct work_struct *work)
 {
 	struct aio_kiocb *iocb = container_of(work, struct aio_kiocb, fsync.work);
-	const struct cred *old_cred = override_creds(iocb->fsync.creds);
 
-	iocb->ki_res.res = vfs_fsync(iocb->fsync.file, iocb->fsync.datasync);
-	revert_creds(old_cred);
+	scoped_with_creds(iocb->fsync.creds)
+		iocb->ki_res.res = vfs_fsync(iocb->fsync.file, iocb->fsync.datasync);
+
 	put_cred(iocb->fsync.creds);
 	iocb_put(iocb);
 }
@@ -2191,7 +2191,6 @@ SYSCALL_DEFINE3(io_cancel, aio_context_t, ctx_id, struct iocb __user *, iocb,
 		return -EINVAL;
 
 	spin_lock_irq(&ctx->ctx_lock);
-	/* TODO: use a hash or array, this sucks. */
 	list_for_each_entry(kiocb, &ctx->active_reqs, ki_list) {
 		if (kiocb->ki_res.obj == obj) {
 			ret = kiocb->ki_cancel(&kiocb->rw);

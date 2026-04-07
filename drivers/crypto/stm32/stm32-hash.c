@@ -1115,8 +1115,7 @@ static int stm32_hash_copy_sgs(struct stm32_hash_request_ctx *rctx,
 		return -ENOMEM;
 	}
 
-	if (state->bufcnt)
-		memcpy(buf, rctx->hdev->xmit_buf, state->bufcnt);
+	memcpy(buf, rctx->hdev->xmit_buf, state->bufcnt);
 
 	scatterwalk_map_and_copy(buf + state->bufcnt, sg, rctx->offset,
 				 min(new_len, rctx->total) - state->bufcnt, 0);
@@ -1300,8 +1299,7 @@ static int stm32_hash_prepare_request(struct ahash_request *req)
 	}
 
 	/* copy buffer in a temporary one that is used for sg alignment */
-	if (state->bufcnt)
-		memcpy(hdev->xmit_buf, state->buffer, state->bufcnt);
+	memcpy(hdev->xmit_buf, state->buffer, state->bufcnt);
 
 	ret = stm32_hash_align_sgs(req->src, nbytes, bs, init, final, rctx);
 	if (ret)
@@ -1373,7 +1371,6 @@ static void stm32_hash_unprepare_request(struct ahash_request *req)
 		*preg++ = stm32_hash_read(hdev, HASH_CSR(i));
 
 pm_runtime:
-	pm_runtime_mark_last_busy(hdev->dev);
 	pm_runtime_put_autosuspend(hdev->dev);
 }
 
@@ -2532,7 +2529,7 @@ static const struct dev_pm_ops stm32_hash_pm_ops = {
 
 static struct platform_driver stm32_hash_driver = {
 	.probe		= stm32_hash_probe,
-	.remove_new	= stm32_hash_remove,
+	.remove		= stm32_hash_remove,
 	.driver		= {
 		.name	= "stm32-hash",
 		.pm = &stm32_hash_pm_ops,

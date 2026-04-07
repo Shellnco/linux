@@ -73,6 +73,7 @@ static inline void subsys_put(struct subsys_private *sp)
 		kset_put(&sp->subsys);
 }
 
+struct subsys_private *bus_to_subsys(const struct bus_type *bus);
 struct subsys_private *class_to_subsys(const struct class *class);
 
 struct driver_private {
@@ -83,6 +84,18 @@ struct driver_private {
 	struct device_driver *driver;
 };
 #define to_driver(obj) container_of(obj, struct driver_private, kobj)
+
+#ifdef CONFIG_RUST
+/**
+ * struct driver_type - Representation of a Rust driver type.
+ */
+struct driver_type {
+	/**
+	 * @id: Representation of core::any::TypeId.
+	 */
+	u8 id[16];
+} __packed;
+#endif
 
 /**
  * struct device_private - structure to hold the private to the driver core portions of the device structure.
@@ -99,6 +112,7 @@ struct driver_private {
  * @async_driver - pointer to device driver awaiting probe via async_probe
  * @device - pointer back to the struct device that this structure is
  * associated with.
+ * @driver_type - The type of the bound Rust driver.
  * @dead - This device is currently either in the process of or has been
  *	removed from the system. Any asynchronous events scheduled for this
  *	device should exit without taking any action.
@@ -115,6 +129,9 @@ struct device_private {
 	const struct device_driver *async_driver;
 	char *deferred_probe_reason;
 	struct device *device;
+#ifdef CONFIG_RUST
+	struct driver_type driver_type;
+#endif
 	u8 dead:1;
 };
 #define to_device_private_parent(obj)	\
@@ -137,6 +154,7 @@ int hypervisor_init(void);
 static inline int hypervisor_init(void) { return 0; }
 #endif
 int platform_bus_init(void);
+int faux_bus_init(void);
 void cpu_dev_init(void);
 void container_dev_init(void);
 #ifdef CONFIG_AUXILIARY_BUS
@@ -179,6 +197,26 @@ int driver_add_groups(const struct device_driver *drv, const struct attribute_gr
 void driver_remove_groups(const struct device_driver *drv, const struct attribute_group **groups);
 void device_driver_detach(struct device *dev);
 
+static inline void device_set_driver(struct device *dev, const struct device_driver *drv)
+{
+	/*
+	 * Majority (all?) read accesses to dev->driver happens either
+	 * while holding device lock or in bus/driver code that is only
+	 * invoked when the device is bound to a driver and there is no
+	 * concern of the pointer being changed while it is being read.
+	 * However when reading device's uevent file we read driver pointer
+	 * without taking device lock (so we do not block there for
+	 * arbitrary amount of time). We use WRITE_ONCE() here to prevent
+	 * tearing so that READ_ONCE() can safely be used in uevent code.
+	 */
+	// FIXME - this cast should not be needed "soon"
+	WRITE_ONCE(dev->driver, (struct device_driver *)drv);
+}
+
+void devres_for_each_res(struct device *dev, dr_release_t release,
+			 dr_match_t match, void *match_data,
+			 void (*fn)(struct device *, void *, void *),
+			 void *data);
 int devres_release_all(struct device *dev);
 void device_block_probing(void);
 void device_unblock_probing(void);
@@ -230,8 +268,17 @@ void device_links_driver_cleanup(struct device *dev);
 void device_links_no_driver(struct device *dev);
 bool device_links_busy(struct device *dev);
 void device_links_unbind_consumers(struct device *dev);
+bool device_link_flag_is_sync_state_only(u32 flags);
 void fw_devlink_drivers_done(void);
 void fw_devlink_probing_done(void);
+
+#define dev_for_each_link_to_supplier(__link, __dev)	\
+	list_for_each_entry_srcu(__link, &(__dev)->links.suppliers, c_node, \
+				 device_links_read_lock_held())
+
+#define dev_for_each_link_to_consumer(__link, __dev)	\
+	list_for_each_entry_srcu(__link, &(__dev)->links.consumers, s_node, \
+				 device_links_read_lock_held())
 
 /* device pm support */
 void device_pm_move_to_tail(struct device *dev);
@@ -246,3 +293,12 @@ static inline int devtmpfs_delete_node(struct device *dev) { return 0; }
 
 void software_node_notify(struct device *dev);
 void software_node_notify_remove(struct device *dev);
+
+#ifdef CONFIG_PINCTRL
+int pinctrl_bind_pins(struct device *dev);
+#else
+static inline int pinctrl_bind_pins(struct device *dev)
+{
+	return 0;
+}
+#endif /* CONFIG_PINCTRL */

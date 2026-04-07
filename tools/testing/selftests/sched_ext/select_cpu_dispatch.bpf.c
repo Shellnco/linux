@@ -29,13 +29,13 @@ s32 BPF_STRUCT_OPS(select_cpu_dispatch_select_cpu, struct task_struct *p,
 	cpu = prev_cpu;
 
 dispatch:
-	scx_bpf_dispatch(p, dsq_id, SCX_SLICE_DFL, 0);
+	scx_bpf_dsq_insert(p, dsq_id, SCX_SLICE_DFL, 0);
 	return cpu;
 }
 
 SEC(".struct_ops.link")
 struct sched_ext_ops select_cpu_dispatch_ops = {
-	.select_cpu		= select_cpu_dispatch_select_cpu,
+	.select_cpu		= (void *) select_cpu_dispatch_select_cpu,
 	.name			= "select_cpu_dispatch",
 	.timeout_ms		= 1000U,
 };

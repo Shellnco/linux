@@ -9,6 +9,8 @@
  * The V3D block provides 16 hardware counters which can count various events.
  */
 
+#include <drm/drm_print.h>
+
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 
@@ -23,7 +25,7 @@ void vc4_perfmon_get(struct vc4_perfmon *perfmon)
 		return;
 
 	vc4 = perfmon->dev;
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	refcount_inc(&perfmon->refcnt);
@@ -37,7 +39,7 @@ void vc4_perfmon_put(struct vc4_perfmon *perfmon)
 		return;
 
 	vc4 = perfmon->dev;
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	if (refcount_dec_and_test(&perfmon->refcnt))
@@ -49,7 +51,7 @@ void vc4_perfmon_start(struct vc4_dev *vc4, struct vc4_perfmon *perfmon)
 	unsigned int i;
 	u32 mask;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	if (WARN_ON_ONCE(!perfmon || vc4->active_perfmon))
@@ -69,7 +71,7 @@ void vc4_perfmon_stop(struct vc4_dev *vc4, struct vc4_perfmon *perfmon,
 {
 	unsigned int i;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	if (WARN_ON_ONCE(!vc4->active_perfmon ||
@@ -90,7 +92,7 @@ struct vc4_perfmon *vc4_perfmon_find(struct vc4_file *vc4file, int id)
 	struct vc4_dev *vc4 = vc4file->dev;
 	struct vc4_perfmon *perfmon;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return NULL;
 
 	mutex_lock(&vc4file->perfmon.lock);
@@ -105,7 +107,7 @@ void vc4_perfmon_open_file(struct vc4_file *vc4file)
 {
 	struct vc4_dev *vc4 = vc4file->dev;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	mutex_init(&vc4file->perfmon.lock);
@@ -116,6 +118,11 @@ void vc4_perfmon_open_file(struct vc4_file *vc4file)
 static int vc4_perfmon_idr_del(int id, void *elem, void *data)
 {
 	struct vc4_perfmon *perfmon = elem;
+	struct vc4_dev *vc4 = (struct vc4_dev *)data;
+
+	/* If the active perfmon is being destroyed, stop it first */
+	if (perfmon == vc4->active_perfmon)
+		vc4_perfmon_stop(vc4, perfmon, false);
 
 	vc4_perfmon_put(perfmon);
 
@@ -126,11 +133,11 @@ void vc4_perfmon_close_file(struct vc4_file *vc4file)
 {
 	struct vc4_dev *vc4 = vc4file->dev;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return;
 
 	mutex_lock(&vc4file->perfmon.lock);
-	idr_for_each(&vc4file->perfmon.idr, vc4_perfmon_idr_del, NULL);
+	idr_for_each(&vc4file->perfmon.idr, vc4_perfmon_idr_del, vc4);
 	idr_destroy(&vc4file->perfmon.idr);
 	mutex_unlock(&vc4file->perfmon.lock);
 	mutex_destroy(&vc4file->perfmon.lock);
@@ -146,7 +153,7 @@ int vc4_perfmon_create_ioctl(struct drm_device *dev, void *data,
 	unsigned int i;
 	int ret;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return -ENODEV;
 
 	if (!vc4->v3d) {
@@ -165,8 +172,7 @@ int vc4_perfmon_create_ioctl(struct drm_device *dev, void *data,
 			return -EINVAL;
 	}
 
-	perfmon = kzalloc(struct_size(perfmon, counters, req->ncounters),
-			  GFP_KERNEL);
+	perfmon = kzalloc_flex(*perfmon, counters, req->ncounters);
 	if (!perfmon)
 		return -ENOMEM;
 	perfmon->dev = vc4;
@@ -200,7 +206,7 @@ int vc4_perfmon_destroy_ioctl(struct drm_device *dev, void *data,
 	struct drm_vc4_perfmon_destroy *req = data;
 	struct vc4_perfmon *perfmon;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return -ENODEV;
 
 	if (!vc4->v3d) {
@@ -228,7 +234,7 @@ int vc4_perfmon_get_values_ioctl(struct drm_device *dev, void *data,
 	struct vc4_perfmon *perfmon;
 	int ret;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return -ENODEV;
 
 	if (!vc4->v3d) {
@@ -236,11 +242,7 @@ int vc4_perfmon_get_values_ioctl(struct drm_device *dev, void *data,
 		return -ENODEV;
 	}
 
-	mutex_lock(&vc4file->perfmon.lock);
-	perfmon = idr_find(&vc4file->perfmon.idr, req->id);
-	vc4_perfmon_get(perfmon);
-	mutex_unlock(&vc4file->perfmon.lock);
-
+	perfmon = vc4_perfmon_find(vc4file, req->id);
 	if (!perfmon)
 		return -EINVAL;
 

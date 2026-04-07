@@ -35,10 +35,10 @@ static const struct version_number COMPRESSED_BLOCK_1_0 = {
 /**
  * vdo_get_compressed_block_fragment() - Get a reference to a compressed fragment from a compressed
  *                                       block.
- * @mapping_state [in] The mapping state for the look up.
- * @compressed_block [in] The compressed block that was read from disk.
- * @fragment_offset [out] The offset of the fragment within a compressed block.
- * @fragment_size [out] The size of the fragment.
+ * @mapping_state: The mapping state describing the fragment.
+ * @block: The compressed block that was read from disk.
+ * @fragment_offset: The offset of the fragment within the compressed block.
+ * @fragment_size: The size of the fragment.
  *
  * Return: If a valid compressed fragment is found, VDO_SUCCESS; otherwise, VDO_INVALID_FRAGMENT if
  *         the fragment is invalid.
@@ -250,7 +250,6 @@ static void abort_packing(struct data_vio *data_vio)
 /**
  * release_compressed_write_waiter() - Update a data_vio for which a successful compressed write
  *                                     has completed and send it on its way.
-
  * @data_vio: The data_vio to release.
  * @allocation: The allocation to which the compressed block was written.
  */
@@ -383,7 +382,8 @@ static void initialize_compressed_block(struct compressed_block *block, u16 size
  * @compression: The agent's compression_state to pack in to.
  * @data_vio: The data_vio to pack.
  * @offset: The offset into the compressed block at which to pack the fragment.
- * @compressed_block: The compressed block which will be written out when batch is fully packed.
+ * @slot: The slot number in the compressed block.
+ * @block: The compressed block which will be written out when batch is fully packed.
  *
  * Return: The new amount of space used.
  */
@@ -706,11 +706,7 @@ void vdo_increment_packer_flush_generation(struct packer *packer)
 	vdo_flush_packer(packer);
 }
 
-/**
- * initiate_drain() - Initiate a drain.
- *
- * Implements vdo_admin_initiator_fn.
- */
+/** Implements vdo_admin_initiator_fn. */
 static void initiate_drain(struct admin_state *state)
 {
 	struct packer *packer = container_of(state, struct packer, state);

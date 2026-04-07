@@ -388,14 +388,13 @@ static int mtk_spi_slave_probe(struct platform_device *pdev)
 	int irq, ret;
 	const struct of_device_id *of_id;
 
-	ctlr = spi_alloc_slave(&pdev->dev, sizeof(*mdata));
+	ctlr = spi_alloc_target(&pdev->dev, sizeof(*mdata));
 	if (!ctlr) {
-		dev_err(&pdev->dev, "failed to alloc spi slave\n");
+		dev_err(&pdev->dev, "failed to alloc spi target\n");
 		return -ENOMEM;
 	}
 
 	ctlr->auto_runtime_pm = true;
-	ctlr->dev.of_node = pdev->dev.of_node;
 	ctlr->mode_bits = SPI_CPOL | SPI_CPHA;
 	ctlr->mode_bits |= SPI_LSB_FIRST;
 
@@ -455,14 +454,12 @@ static int mtk_spi_slave_probe(struct platform_device *pdev)
 	pm_runtime_enable(&pdev->dev);
 
 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
+	clk_disable_unprepare(mdata->spi_clk);
 	if (ret) {
 		dev_err(&pdev->dev,
 			"failed to register slave controller(%d)\n", ret);
-		clk_disable_unprepare(mdata->spi_clk);
 		goto err_disable_runtime_pm;
 	}
-
-	clk_disable_unprepare(mdata->spi_clk);
 
 	return 0;
 
@@ -558,7 +555,7 @@ static struct platform_driver mtk_spi_slave_driver = {
 		.of_match_table = mtk_spi_slave_of_match,
 	},
 	.probe = mtk_spi_slave_probe,
-	.remove_new = mtk_spi_slave_remove,
+	.remove = mtk_spi_slave_remove,
 };
 
 module_platform_driver(mtk_spi_slave_driver);

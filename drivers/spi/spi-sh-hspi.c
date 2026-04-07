@@ -253,7 +253,6 @@ static int hspi_probe(struct platform_device *pdev)
 
 	ctlr->bus_num = pdev->id;
 	ctlr->mode_bits	= SPI_CPOL | SPI_CPHA;
-	ctlr->dev.of_node = pdev->dev.of_node;
 	ctlr->auto_runtime_pm = true;
 	ctlr->transfer_one_message = hspi_transfer_one_message;
 	ctlr->bits_per_word_mask = SPI_BPW_MASK(8);
@@ -293,7 +292,7 @@ MODULE_DEVICE_TABLE(of, hspi_of_match);
 
 static struct platform_driver hspi_driver = {
 	.probe = hspi_probe,
-	.remove_new = hspi_remove,
+	.remove = hspi_remove,
 	.driver = {
 		.name = "sh-hspi",
 		.of_match_table = hspi_of_match,

@@ -487,7 +487,7 @@ static int l2tp_session_collision_add(struct l2tp_net *pn,
 		/* First collision. Allocate list to manage the collided sessions
 		 * and add the existing session to the list.
 		 */
-		clist = kmalloc(sizeof(*clist), GFP_ATOMIC);
+		clist = kmalloc_obj(*clist, GFP_ATOMIC);
 		if (!clist)
 			return -ENOMEM;
 
@@ -1086,8 +1086,10 @@ int l2tp_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
 	tunnel = session->tunnel;
 
 	/* Check protocol version */
-	if (version != tunnel->version)
+	if (version != tunnel->version) {
+		l2tp_session_put(session);
 		goto invalid;
+	}
 
 	if (version == L2TP_HDR_VER_3 &&
 	    l2tp_v3_ensure_opt_in_linear(session, skb, &ptr, &optr)) {
@@ -1246,9 +1248,9 @@ static int l2tp_xmit_core(struct l2tp_session *session, struct sk_buff *skb, uns
 	else
 		l2tp_build_l2tpv3_header(session, __skb_push(skb, session->hdr_len));
 
-	/* Reset skb netfilter state */
-	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
-	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED | IPSKB_REROUTED);
+	/* Reset control buffer */
+	memset(skb->cb, 0, sizeof(skb->cb));
+
 	nf_reset_ct(skb);
 
 	/* L2TP uses its own lockdep subclass to avoid lockdep splats caused by
@@ -1414,8 +1416,6 @@ static void l2tp_tunnel_del_work(struct work_struct *work)
 {
 	struct l2tp_tunnel *tunnel = container_of(work, struct l2tp_tunnel,
 						  del_work);
-	struct sock *sk = tunnel->sock;
-	struct socket *sock = sk->sk_socket;
 
 	l2tp_tunnel_closeall(tunnel);
 
@@ -1423,6 +1423,8 @@ static void l2tp_tunnel_del_work(struct work_struct *work)
 	 * the sk API to release it here.
 	 */
 	if (tunnel->fd < 0) {
+		struct socket *sock = tunnel->sock->sk_socket;
+
 		if (sock) {
 			kernel_sock_shutdown(sock, SHUT_RDWR);
 			sock_release(sock);
@@ -1503,7 +1505,7 @@ static int l2tp_tunnel_sock_create(struct net *net,
 			memcpy(&ip6_addr.l2tp_addr, cfg->local_ip6,
 			       sizeof(ip6_addr.l2tp_addr));
 			ip6_addr.l2tp_conn_id = tunnel_id;
-			err = kernel_bind(sock, (struct sockaddr *)&ip6_addr,
+			err = kernel_bind(sock, (struct sockaddr_unsized *)&ip6_addr,
 					  sizeof(ip6_addr));
 			if (err < 0)
 				goto out;
@@ -1513,7 +1515,7 @@ static int l2tp_tunnel_sock_create(struct net *net,
 			       sizeof(ip6_addr.l2tp_addr));
 			ip6_addr.l2tp_conn_id = peer_tunnel_id;
 			err = kernel_connect(sock,
-					     (struct sockaddr *)&ip6_addr,
+					     (struct sockaddr_unsized *)&ip6_addr,
 					     sizeof(ip6_addr), 0);
 			if (err < 0)
 				goto out;
@@ -1530,7 +1532,7 @@ static int l2tp_tunnel_sock_create(struct net *net,
 			ip_addr.l2tp_family = AF_INET;
 			ip_addr.l2tp_addr = cfg->local_ip;
 			ip_addr.l2tp_conn_id = tunnel_id;
-			err = kernel_bind(sock, (struct sockaddr *)&ip_addr,
+			err = kernel_bind(sock, (struct sockaddr_unsized *)&ip_addr,
 					  sizeof(ip_addr));
 			if (err < 0)
 				goto out;
@@ -1538,7 +1540,7 @@ static int l2tp_tunnel_sock_create(struct net *net,
 			ip_addr.l2tp_family = AF_INET;
 			ip_addr.l2tp_addr = cfg->peer_ip;
 			ip_addr.l2tp_conn_id = peer_tunnel_id;
-			err = kernel_connect(sock, (struct sockaddr *)&ip_addr,
+			err = kernel_connect(sock, (struct sockaddr_unsized *)&ip_addr,
 					     sizeof(ip_addr), 0);
 			if (err < 0)
 				goto out;
@@ -1570,7 +1572,7 @@ int l2tp_tunnel_create(int fd, int version, u32 tunnel_id, u32 peer_tunnel_id,
 	if (cfg)
 		encap = cfg->encap;
 
-	tunnel = kzalloc(sizeof(*tunnel), GFP_KERNEL);
+	tunnel = kzalloc_obj(*tunnel);
 	if (!tunnel) {
 		err = -ENOMEM;
 		goto err;
@@ -1870,15 +1872,31 @@ static __net_exit void l2tp_pre_exit_net(struct net *net)
 	}
 }
 
+static int l2tp_idr_item_unexpected(int id, void *p, void *data)
+{
+	const char *idr_name = data;
+
+	pr_err("l2tp: %s IDR not empty at net %d exit\n", idr_name, id);
+	WARN_ON_ONCE(1);
+	return 1;
+}
+
 static __net_exit void l2tp_exit_net(struct net *net)
 {
 	struct l2tp_net *pn = l2tp_pernet(net);
 
-	WARN_ON_ONCE(!idr_is_empty(&pn->l2tp_v2_session_idr));
+	/* Our per-net IDRs should be empty. Check that is so, to
+	 * help catch cleanup races or refcnt leaks.
+	 */
+	idr_for_each(&pn->l2tp_v2_session_idr, l2tp_idr_item_unexpected,
+		     "v2_session");
+	idr_for_each(&pn->l2tp_v3_session_idr, l2tp_idr_item_unexpected,
+		     "v3_session");
+	idr_for_each(&pn->l2tp_tunnel_idr, l2tp_idr_item_unexpected,
+		     "tunnel");
+
 	idr_destroy(&pn->l2tp_v2_session_idr);
-	WARN_ON_ONCE(!idr_is_empty(&pn->l2tp_v3_session_idr));
 	idr_destroy(&pn->l2tp_v3_session_idr);
-	WARN_ON_ONCE(!idr_is_empty(&pn->l2tp_tunnel_idr));
 	idr_destroy(&pn->l2tp_tunnel_idr);
 }
 

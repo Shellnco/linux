@@ -772,8 +772,11 @@ ascend_to_node:
 	for (; slot < ASSOC_ARRAY_FAN_OUT; slot++) {
 		ptr = READ_ONCE(node->slots[slot]);
 
-		if (assoc_array_ptr_is_meta(ptr) && node->back_pointer)
-			goto descend_to_node;
+		if (assoc_array_ptr_is_meta(ptr)) {
+			if (node->back_pointer ||
+			    assoc_array_ptr_is_shortcut(ptr))
+				goto descend_to_node;
+		}
 
 		if (!keyring_ptr_is_keyring(ptr))
 			continue;
@@ -974,7 +977,7 @@ static struct key_restriction *keyring_restriction_alloc(
 	key_restrict_link_func_t check)
 {
 	struct key_restriction *keyres =
-		kzalloc(sizeof(struct key_restriction), GFP_KERNEL);
+		kzalloc_obj(struct key_restriction);
 
 	if (!keyres)
 		return ERR_PTR(-ENOMEM);

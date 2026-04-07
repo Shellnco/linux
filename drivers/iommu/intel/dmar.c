@@ -99,7 +99,7 @@ void *dmar_alloc_dev_scope(void *start, void *end, int *cnt)
 	if (*cnt == 0)
 		return NULL;
 
-	return kcalloc(*cnt, sizeof(struct dmar_dev_scope), GFP_KERNEL);
+	return kzalloc_objs(struct dmar_dev_scope, *cnt);
 }
 
 void dmar_free_dev_scope(struct dmar_dev_scope **devices, int *cnt)
@@ -935,13 +935,10 @@ void __init detect_intel_iommu(void)
 		pci_request_acs();
 	}
 
-#ifdef CONFIG_X86
 	if (!ret) {
 		x86_init.iommu.iommu_init = intel_iommu_init;
 		x86_platform.iommu_shutdown = intel_iommu_shutdown;
 	}
-
-#endif
 
 	if (dmar_tbl) {
 		acpi_put_table(dmar_tbl);
@@ -1049,7 +1046,7 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 		return -EINVAL;
 	}
 
-	iommu = kzalloc(sizeof(*iommu), GFP_KERNEL);
+	iommu = kzalloc_obj(*iommu);
 	if (!iommu)
 		return -ENOMEM;
 
@@ -1060,7 +1057,7 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 		err = iommu->seq_id;
 		goto error;
 	}
-	sprintf(iommu->name, "dmar%d", iommu->seq_id);
+	snprintf(iommu->name, sizeof(iommu->name), "dmar%d", iommu->seq_id);
 
 	err = map_iommu(iommu, drhd);
 	if (err) {
@@ -1099,6 +1096,9 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 	spin_lock_init(&iommu->device_rbtree_lock);
 	mutex_init(&iommu->iopf_lock);
 	iommu->node = NUMA_NO_NODE;
+	spin_lock_init(&iommu->lock);
+	ida_init(&iommu->domain_ida);
+	mutex_init(&iommu->did_lock);
 
 	ver = readl(iommu->reg + DMAR_VER_REG);
 	pr_info("%s: reg_base_addr %llx ver %d:%d cap %llx ecap %llx\n",
@@ -1187,7 +1187,7 @@ static void free_iommu(struct intel_iommu *iommu)
 	}
 
 	if (iommu->qi) {
-		iommu_free_page(iommu->qi->desc);
+		iommu_free_pages(iommu->qi->desc);
 		kfree(iommu->qi->desc_status);
 		kfree(iommu->qi);
 	}
@@ -1195,6 +1195,7 @@ static void free_iommu(struct intel_iommu *iommu)
 	if (iommu->reg)
 		unmap_iommu(iommu);
 
+	ida_destroy(&iommu->domain_ida);
 	ida_free(&dmar_seq_ids, iommu->seq_id);
 	kfree(iommu);
 }
@@ -1313,7 +1314,6 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	if (fault & DMA_FSTS_ITE) {
 		head = readl(iommu->reg + DMAR_IQH_REG);
 		head = ((head >> shift) - 1 + QI_LENGTH) % QI_LENGTH;
-		head |= 1;
 		tail = readl(iommu->reg + DMAR_IQT_REG);
 		tail = ((tail >> shift) - 1 + QI_LENGTH) % QI_LENGTH;
 
@@ -1330,7 +1330,7 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 		do {
 			if (qi->desc_status[head] == QI_IN_USE)
 				qi->desc_status[head] = QI_ABORT;
-			head = (head - 2 + QI_LENGTH) % QI_LENGTH;
+			head = (head - 1 + QI_LENGTH) % QI_LENGTH;
 		} while (head != tail);
 
 		/*
@@ -1681,7 +1681,6 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 {
 	struct q_inval *qi;
 	void *desc;
-	int order;
 
 	if (!ecap_qis(iommu->ecap))
 		return -ENOENT;
@@ -1692,7 +1691,7 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	if (iommu->qi)
 		return 0;
 
-	iommu->qi = kmalloc(sizeof(*qi), GFP_ATOMIC);
+	iommu->qi = kmalloc_obj(*qi, GFP_ATOMIC);
 	if (!iommu->qi)
 		return -ENOMEM;
 
@@ -1702,8 +1701,9 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	 * Need two pages to accommodate 256 descriptors of 256 bits each
 	 * if the remapping hardware supports scalable mode translation.
 	 */
-	order = ecap_smts(iommu->ecap) ? 1 : 0;
-	desc = iommu_alloc_pages_node(iommu->node, GFP_ATOMIC, order);
+	desc = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC,
+					 ecap_smts(iommu->ecap) ? SZ_8K :
+								  SZ_4K);
 	if (!desc) {
 		kfree(qi);
 		iommu->qi = NULL;
@@ -1712,9 +1712,9 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 
 	qi->desc = desc;
 
-	qi->desc_status = kcalloc(QI_LENGTH, sizeof(int), GFP_ATOMIC);
+	qi->desc_status = kzalloc_objs(int, QI_LENGTH, GFP_ATOMIC);
 	if (!qi->desc_status) {
-		iommu_free_page(qi->desc);
+		iommu_free_pages(qi->desc);
 		kfree(qi);
 		iommu->qi = NULL;
 		return -ENOMEM;
@@ -1895,19 +1895,6 @@ void dmar_msi_write(int irq, struct msi_msg *msg)
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 }
 
-void dmar_msi_read(int irq, struct msi_msg *msg)
-{
-	struct intel_iommu *iommu = irq_get_handler_data(irq);
-	int reg = dmar_msi_reg(iommu, irq);
-	unsigned long flag;
-
-	raw_spin_lock_irqsave(&iommu->register_lock, flag);
-	msg->data = readl(iommu->reg + reg + 4);
-	msg->address_lo = readl(iommu->reg + reg + 8);
-	msg->address_hi = readl(iommu->reg + reg + 12);
-	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
-}
-
 static int dmar_fault_do_one(struct intel_iommu *iommu, int type,
 		u8 fault_reason, u32 pasid, u16 source_id,
 		unsigned long long addr)
@@ -2056,6 +2043,7 @@ int enable_drhd_fault_handling(unsigned int cpu)
 	/*
 	 * Enable fault control interrupt.
 	 */
+	guard(rwsem_read)(&dmar_global_lock);
 	for_each_iommu(iommu, drhd) {
 		u32 fault_status;
 		int ret;

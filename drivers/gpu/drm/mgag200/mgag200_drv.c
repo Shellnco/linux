@@ -6,19 +6,21 @@
  *          Dave Airlie
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 
-#include <drm/drm_aperture.h>
+#include <drm/clients/drm_client_setup.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fbdev_shmem.h>
 #include <drm/drm_file.h>
+#include <drm/drm_fourcc.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_module.h>
 #include <drm/drm_pciids.h>
-#include <drm/drm_vblank.h>
+#include <drm/drm_print.h>
 
 #include "mgag200_drv.h"
 
@@ -85,34 +87,6 @@ resource_size_t mgag200_probe_vram(void __iomem *mem, resource_size_t size)
 	return offset - 65536;
 }
 
-static irqreturn_t mgag200_irq_handler(int irq, void *arg)
-{
-	struct drm_device *dev = arg;
-	struct mga_device *mdev = to_mga_device(dev);
-	struct drm_crtc *crtc;
-	u32 status, ien;
-
-	status = RREG32(MGAREG_STATUS);
-
-	if (status & MGAREG_STATUS_VLINEPEN) {
-		ien = RREG32(MGAREG_IEN);
-		if (!(ien & MGAREG_IEN_VLINEIEN))
-			goto out;
-
-		crtc = drm_crtc_from_index(dev, 0);
-		if (WARN_ON_ONCE(!crtc))
-			goto out;
-		drm_crtc_handle_vblank(crtc);
-
-		WREG32(MGAREG_ICLEAR, MGAREG_ICLEAR_VLINEICLR);
-
-		return IRQ_HANDLED;
-	}
-
-out:
-	return IRQ_NONE;
-}
-
 /*
  * DRM driver
  */
@@ -124,11 +98,11 @@ static const struct drm_driver mgag200_driver = {
 	.fops = &mgag200_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
-	.date = DRIVER_DATE,
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 	DRM_GEM_SHMEM_DRIVER_OPS,
+	DRM_FBDEV_SHMEM_DRIVER_OPS,
 };
 
 /*
@@ -196,7 +170,6 @@ int mgag200_device_init(struct mga_device *mdev,
 			const struct mgag200_device_funcs *funcs)
 {
 	struct drm_device *dev = &mdev->base;
-	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	u8 crtcext3, misc;
 	int ret;
 
@@ -223,14 +196,6 @@ int mgag200_device_init(struct mga_device *mdev,
 	mutex_unlock(&mdev->rmmio_lock);
 
 	WREG32(MGAREG_IEN, 0);
-	WREG32(MGAREG_ICLEAR, MGAREG_ICLEAR_VLINEICLR);
-
-	ret = devm_request_irq(&pdev->dev, pdev->irq, mgag200_irq_handler, IRQF_SHARED,
-			       dev->driver->name, dev);
-	if (ret) {
-		drm_err(dev, "Failed to acquire interrupt, error %d\n", ret);
-		return ret;
-	}
 
 	return 0;
 }
@@ -250,6 +215,7 @@ static const struct pci_device_id mgag200_pciidlist[] = {
 	{ PCI_VENDOR_ID_MATROX, 0x534, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_ER },
 	{ PCI_VENDOR_ID_MATROX, 0x536, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EW3 },
 	{ PCI_VENDOR_ID_MATROX, 0x538, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EH3 },
+	{ PCI_VENDOR_ID_MATROX, 0x53a, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EH5 },
 	{0,}
 };
 
@@ -263,7 +229,7 @@ mgag200_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct drm_device *dev;
 	int ret;
 
-	ret = drm_aperture_remove_conflicting_pci_framebuffers(pdev, &mgag200_driver);
+	ret = aperture_remove_conflicting_pci_devices(pdev, mgag200_driver.name);
 	if (ret)
 		return ret;
 
@@ -292,6 +258,9 @@ mgag200_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	case G200_EH3:
 		mdev = mgag200_g200eh3_device_create(pdev, &mgag200_driver);
 		break;
+	case G200_EH5:
+		mdev = mgag200_g200eh5_device_create(pdev, &mgag200_driver);
+		break;
 	case G200_ER:
 		mdev = mgag200_g200er_device_create(pdev, &mgag200_driver);
 		break;
@@ -314,7 +283,7 @@ mgag200_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * FIXME: A 24-bit color depth does not work with 24 bpp on
 	 * G200ER. Force 32 bpp.
 	 */
-	drm_fbdev_shmem_setup(dev, 32);
+	drm_client_setup_with_fourcc(dev, DRM_FORMAT_XRGB8888);
 
 	return 0;
 }

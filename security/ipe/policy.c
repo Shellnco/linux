@@ -84,8 +84,11 @@ static int set_pkcs7_data(void *ctx, const void *data, size_t len,
  * ipe_new_policy.
  *
  * Context: Requires root->i_rwsem to be held.
- * Return: %0 on success. If an error occurs, the function will return
- * the -errno.
+ * Return:
+ * * %0	- Success
+ * * %-ENOENT	- Policy was deleted while updating
+ * * %-EINVAL	- Policy name mismatch
+ * * %-ESTALE	- Policy version too old
  */
 int ipe_update_policy(struct inode *root, const char *text, size_t textlen,
 		      const char *pkcs7, size_t pkcs7len)
@@ -106,8 +109,8 @@ int ipe_update_policy(struct inode *root, const char *text, size_t textlen,
 		goto err;
 	}
 
-	if (ver_to_u64(old) > ver_to_u64(new)) {
-		rc = -EINVAL;
+	if (ver_to_u64(old) >= ver_to_u64(new)) {
+		rc = -ESTALE;
 		goto err;
 	}
 
@@ -146,10 +149,12 @@ err:
  *
  * Return:
  * * a pointer to the ipe_policy structure	- Success
- * * %-EBADMSG					- Policy is invalid
- * * %-ENOMEM					- Out of memory (OOM)
- * * %-ERANGE					- Policy version number overflow
- * * %-EINVAL					- Policy version parsing error
+ * * %-EBADMSG				- Policy is invalid
+ * * %-ENOMEM				- Out of memory (OOM)
+ * * %-ERANGE				- Policy version number overflow
+ * * %-EINVAL				- Policy version parsing error
+ * * %-ENOKEY				- Policy signing key not found
+ * * %-EKEYREJECTED			- Policy signature verification failed
  */
 struct ipe_policy *ipe_new_policy(const char *text, size_t textlen,
 				  const char *pkcs7, size_t pkcs7len)
@@ -157,7 +162,7 @@ struct ipe_policy *ipe_new_policy(const char *text, size_t textlen,
 	struct ipe_policy *new = NULL;
 	int rc = 0;
 
-	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	new = kzalloc_obj(*new);
 	if (!new)
 		return ERR_PTR(-ENOMEM);
 
@@ -169,9 +174,21 @@ struct ipe_policy *ipe_new_policy(const char *text, size_t textlen,
 			goto err;
 		}
 
-		rc = verify_pkcs7_signature(NULL, 0, new->pkcs7, pkcs7len, NULL,
+		rc = verify_pkcs7_signature(NULL, 0, new->pkcs7, pkcs7len,
+#ifdef CONFIG_IPE_POLICY_SIG_SECONDARY_KEYRING
+					    VERIFY_USE_SECONDARY_KEYRING,
+#else
+					    NULL,
+#endif
 					    VERIFYING_UNSPECIFIED_SIGNATURE,
 					    set_pkcs7_data, new);
+#ifdef CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING
+		if (rc == -ENOKEY || rc == -EKEYREJECTED)
+			rc = verify_pkcs7_signature(NULL, 0, new->pkcs7, pkcs7len,
+						    VERIFY_USE_PLATFORM_KEYRING,
+						    VERIFYING_UNSPECIFIED_SIGNATURE,
+						    set_pkcs7_data, new);
+#endif
 		if (rc)
 			goto err;
 	} else {

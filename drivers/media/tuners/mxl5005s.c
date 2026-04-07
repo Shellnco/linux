@@ -2639,7 +2639,7 @@ static u16 MXL_TuneRF(struct dvb_frontend *fe, u32 RF_Freq)
 	E5A = (((Fmax - state->RF_LO)/1000)*4/((Fmax-Fmin)/1000)) + 1 ;
 	status += MXL_ControlWrite(fe, RFSYN_LPF_R, E5A);
 
-	/* Euqation E5B CHCAL_EN_INIT_RF */
+	/* Equation E5B CHCAL_EN_INIT_RF */
 	status += MXL_ControlWrite(fe, CHCAL_EN_INT_RF, ((E5 == 0) ? 1 : 0));
 	/*if (E5 == 0)
 	 *	status += MXL_ControlWrite(fe, CHCAL_EN_INT_RF, 1);
@@ -4103,7 +4103,7 @@ struct dvb_frontend *mxl5005s_attach(struct dvb_frontend *fe,
 	struct mxl5005s_state *state = NULL;
 	dprintk(1, "%s()\n", __func__);
 
-	state = kzalloc(sizeof(struct mxl5005s_state), GFP_KERNEL);
+	state = kzalloc_obj(struct mxl5005s_state);
 	if (state == NULL)
 		return NULL;
 

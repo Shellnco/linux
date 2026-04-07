@@ -25,7 +25,7 @@
 MODULE_DESCRIPTION("Maxtor USB OneTouch hard drive button driver");
 MODULE_AUTHOR("Nick Sillik <n.sillik@temple.edu>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(USB_STORAGE);
+MODULE_IMPORT_NS("USB_STORAGE");
 
 #define ONETOUCH_PKT_LEN        0x02
 #define ONETOUCH_BUTTON         KEY_PROG1
@@ -183,7 +183,7 @@ static int onetouch_connect_input(struct us_data *ss)
 	maxp = usb_maxpacket(udev, pipe);
 	maxp = min(maxp, ONETOUCH_PKT_LEN);
 
-	onetouch = kzalloc(sizeof(struct usb_onetouch), GFP_KERNEL);
+	onetouch = kzalloc_obj(struct usb_onetouch);
 	input_dev = input_allocate_device();
 	if (!onetouch || !input_dev)
 		goto fail1;

@@ -25,6 +25,8 @@
  * @chan_platform_receiver: Optional Platform Receiver mailbox unidirectional channel
  * @cinfo: SCMI channel info
  * @shmem: Transmit/Receive shared memory area
+ * @chan_lock: Lock that prevents multiple xfers from being queued
+ * @io_ops: Transport specific I/O operations
  */
 struct scmi_mailbox {
 	struct mbox_client cl;
@@ -33,6 +35,8 @@ struct scmi_mailbox {
 	struct mbox_chan *chan_platform_receiver;
 	struct scmi_chan_info *cinfo;
 	struct scmi_shared_mem __iomem *shmem;
+	struct mutex chan_lock;
+	struct scmi_shmem_io_ops *io_ops;
 };
 
 #define client_to_scmi_mailbox(c) container_of(c, struct scmi_mailbox, cl)
@@ -43,7 +47,8 @@ static void tx_prepare(struct mbox_client *cl, void *m)
 {
 	struct scmi_mailbox *smbox = client_to_scmi_mailbox(cl);
 
-	core->shmem->tx_prepare(smbox->shmem, m, smbox->cinfo);
+	core->shmem->tx_prepare(smbox->shmem, m, smbox->cinfo,
+				smbox->io_ops->toio);
 }
 
 static void rx_callback(struct mbox_client *cl, void *m)
@@ -122,8 +127,8 @@ static int mailbox_chan_validate(struct device *cdev, int *a2p_rx_chan,
 	    (num_mb == 1 && num_sh != 1) || (num_mb == 3 && num_sh != 2) ||
 	    (num_mb == 4 && num_sh != 2)) {
 		dev_warn(cdev,
-			 "Invalid channel descriptor for '%s' - mbs:%d  shm:%d\n",
-			 of_node_full_name(np), num_mb, num_sh);
+			 "Invalid channel descriptor for '%pOF' - mbs:%d  shm:%d\n",
+			 np, num_mb, num_sh);
 		return -EINVAL;
 	}
 
@@ -135,8 +140,7 @@ static int mailbox_chan_validate(struct device *cdev, int *a2p_rx_chan,
 					of_parse_phandle(np, "shmem", 1);
 
 		if (!np_tx || !np_rx || np_tx == np_rx) {
-			dev_warn(cdev, "Invalid shmem descriptor for '%s'\n",
-				 of_node_full_name(np));
+			dev_warn(cdev, "Invalid shmem descriptor for '%pOF'\n", np);
 			ret = -EINVAL;
 		}
 	}
@@ -195,7 +199,8 @@ static int mailbox_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 	if (!smbox)
 		return -ENOMEM;
 
-	smbox->shmem = core->shmem->setup_iomap(cinfo, dev, tx, NULL);
+	smbox->shmem = core->shmem->setup_iomap(cinfo, dev, tx, NULL,
+						&smbox->io_ops);
 	if (IS_ERR(smbox->shmem))
 		return PTR_ERR(smbox->shmem);
 
@@ -238,6 +243,7 @@ static int mailbox_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 
 	cinfo->transport_info = smbox;
 	smbox->cinfo = cinfo;
+	mutex_init(&smbox->chan_lock);
 
 	return 0;
 }
@@ -267,13 +273,23 @@ static int mailbox_send_message(struct scmi_chan_info *cinfo,
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 	int ret;
 
+	/*
+	 * The mailbox layer has its own queue. However the mailbox queue
+	 * confuses the per message SCMI timeouts since the clock starts when
+	 * the message is submitted into the mailbox queue. So when multiple
+	 * messages are queued up the clock starts on all messages instead of
+	 * only the one inflight.
+	 */
+	mutex_lock(&smbox->chan_lock);
+
 	ret = mbox_send_message(smbox->chan, xfer);
+	/* mbox_send_message returns non-negative value on success */
+	if (ret < 0) {
+		mutex_unlock(&smbox->chan_lock);
+		return ret;
+	}
 
-	/* mbox_send_message returns non-negative value on success, so reset */
-	if (ret > 0)
-		ret = 0;
-
-	return ret;
+	return 0;
 }
 
 static void mailbox_mark_txdone(struct scmi_chan_info *cinfo, int ret,
@@ -281,13 +297,10 @@ static void mailbox_mark_txdone(struct scmi_chan_info *cinfo, int ret,
 {
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 
-	/*
-	 * NOTE: we might prefer not to need the mailbox ticker to manage the
-	 * transfer queueing since the protocol layer queues things by itself.
-	 * Unfortunately, we have to kick the mailbox framework after we have
-	 * received our message.
-	 */
 	mbox_client_txdone(smbox->chan, ret);
+
+	/* Release channel */
+	mutex_unlock(&smbox->chan_lock);
 }
 
 static void mailbox_fetch_response(struct scmi_chan_info *cinfo,
@@ -295,7 +308,7 @@ static void mailbox_fetch_response(struct scmi_chan_info *cinfo,
 {
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 
-	core->shmem->fetch_response(smbox->shmem, xfer);
+	core->shmem->fetch_response(smbox->shmem, xfer, smbox->io_ops->fromio);
 }
 
 static void mailbox_fetch_notification(struct scmi_chan_info *cinfo,
@@ -303,7 +316,8 @@ static void mailbox_fetch_notification(struct scmi_chan_info *cinfo,
 {
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 
-	core->shmem->fetch_notification(smbox->shmem, max_len, xfer);
+	core->shmem->fetch_notification(smbox->shmem, max_len, xfer,
+					smbox->io_ops->fromio);
 }
 
 static void mailbox_clear_channel(struct scmi_chan_info *cinfo)
@@ -356,13 +370,14 @@ static struct scmi_desc scmi_mailbox_desc = {
 	.ops = &scmi_mailbox_ops,
 	.max_rx_timeout_ms = 30, /* We may increase this if required */
 	.max_msg = 20, /* Limited by MBOX_TX_QUEUE_LEN */
-	.max_msg_size = 128,
+	.max_msg_size = SCMI_SHMEM_MAX_PAYLOAD_SIZE,
 };
 
 static const struct of_device_id scmi_of_match[] = {
 	{ .compatible = "arm,scmi" },
 	{ /* Sentinel */ },
 };
+MODULE_DEVICE_TABLE(of, scmi_of_match);
 
 DEFINE_SCMI_TRANSPORT_DRIVER(scmi_mailbox, scmi_mailbox_driver,
 			     scmi_mailbox_desc, scmi_of_match, core);

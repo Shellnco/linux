@@ -202,9 +202,9 @@ struct ocmem *of_get_ocmem(struct device *dev)
 	}
 
 	ocmem = platform_get_drvdata(pdev);
+	put_device(&pdev->dev);
 	if (!ocmem) {
 		dev_err(dev, "Cannot get ocmem\n");
-		put_device(&pdev->dev);
 		return ERR_PTR(-ENODEV);
 	}
 	return ocmem;
@@ -226,7 +226,7 @@ struct ocmem_buf *ocmem_allocate(struct ocmem *ocmem, enum ocmem_client client,
 	if (test_and_set_bit_lock(BIT(client), &ocmem->active_allocations))
 		return ERR_PTR(-EBUSY);
 
-	struct ocmem_buf *buf __free(kfree) = kzalloc(sizeof(*buf), GFP_KERNEL);
+	struct ocmem_buf *buf __free(kfree) = kzalloc_obj(*buf);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto err_unlock;
@@ -439,7 +439,7 @@ MODULE_DEVICE_TABLE(of, ocmem_of_match);
 
 static struct platform_driver ocmem_driver = {
 	.probe = ocmem_dev_probe,
-	.remove_new = ocmem_dev_remove,
+	.remove = ocmem_dev_remove,
 	.driver = {
 		.name = "ocmem",
 		.of_match_table = ocmem_of_match,

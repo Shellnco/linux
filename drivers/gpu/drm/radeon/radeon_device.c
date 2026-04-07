@@ -26,7 +26,6 @@
  *          Jerome Glisse
  */
 
-#include <linux/console.h>
 #include <linux/efi.h>
 #include <linux/pci.h>
 #include <linux/pm_runtime.h>
@@ -35,6 +34,7 @@
 #include <linux/vgaarb.h>
 
 #include <drm/drm_cache.h>
+#include <drm/drm_client_event.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
@@ -529,7 +529,7 @@ int radeon_wb_init(struct radeon_device *rdev)
  * @mc: memory controller structure holding memory informations
  * @base: base address at which to put VRAM
  *
- * Function will place try to place VRAM at base address provided
+ * Function will try to place VRAM at base address provided
  * as parameter (which is so far either PCI aperture address or
  * for IGP TOM base address).
  *
@@ -554,15 +554,15 @@ int radeon_wb_init(struct radeon_device *rdev)
  * cover the whole aperture even if VRAM size is inferior to aperture size
  * Novell bug 204882 + along with lots of ubuntu ones
  *
- * Note 3: when limiting vram it's safe to overwritte real_vram_size because
+ * Note 3: when limiting vram it's safe to overwrite real_vram_size because
  * we are not in case where real_vram_size is inferior to mc_vram_size (ie
- * note afected by bogus hw of Novell bug 204882 + along with lots of ubuntu
+ * not affected by bogus hw of Novell bug 204882 + along with lots of ubuntu
  * ones)
  *
  * Note 4: IGP TOM addr should be the same as the aperture addr, we don't
  * explicitly check for that thought.
  *
- * FIXME: when reducing VRAM size align new size on power of 2.
+ * FIXME: when reducing VRAM size, align new size on power of 2.
  */
 void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 base)
 {
@@ -593,7 +593,7 @@ void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 
  * @rdev: radeon device structure holding all necessary informations
  * @mc: memory controller structure holding memory informations
  *
- * Function will place try to place GTT before or after VRAM.
+ * Function will try to place GTT before or after VRAM.
  *
  * If GTT size is bigger than space left then we ajust GTT size.
  * Thus function will never fails.
@@ -974,7 +974,7 @@ static uint32_t cail_ioreg_read(struct card_info *info, uint32_t reg)
 int radeon_atombios_init(struct radeon_device *rdev)
 {
 	struct card_info *atom_card_info =
-	    kzalloc(sizeof(struct card_info), GFP_KERNEL);
+	    kzalloc_obj(struct card_info);
 
 	if (!atom_card_info)
 		return -ENOMEM;
@@ -1374,6 +1374,7 @@ int radeon_device_init(struct radeon_device *rdev,
 		pr_warn("radeon: No suitable DMA available\n");
 		return r;
 	}
+	rdev->pdev->msi_addr_mask = DMA_BIT_MASK(dma_bits);
 	rdev->need_swiotlb = drm_need_swiotlb(dma_bits);
 
 	/* Registers mapping */
@@ -1542,7 +1543,7 @@ void radeon_device_fini(struct radeon_device *rdev)
  * Called at driver suspend.
  */
 int radeon_suspend_kms(struct drm_device *dev, bool suspend,
-		       bool fbcon, bool freeze)
+		       bool notify_clients, bool freeze)
 {
 	struct radeon_device *rdev;
 	struct pci_dev *pdev;
@@ -1634,11 +1635,9 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 		pci_set_power_state(pdev, PCI_D3hot);
 	}
 
-	if (fbcon) {
-		console_lock();
-		radeon_fbdev_set_suspend(rdev, 1);
-		console_unlock();
-	}
+	if (notify_clients)
+		drm_client_dev_suspend(dev);
+
 	return 0;
 }
 
@@ -1649,7 +1648,7 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
  * Returns 0 for success or an error on failure.
  * Called at driver resume.
  */
-int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon)
+int radeon_resume_kms(struct drm_device *dev, bool resume, bool notify_clients)
 {
 	struct drm_connector *connector;
 	struct radeon_device *rdev = dev->dev_private;
@@ -1660,17 +1659,11 @@ int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon)
 	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 
-	if (fbcon) {
-		console_lock();
-	}
 	if (resume) {
 		pci_set_power_state(pdev, PCI_D0);
 		pci_restore_state(pdev);
-		if (pci_enable_device(pdev)) {
-			if (fbcon)
-				console_unlock();
+		if (pci_enable_device(pdev))
 			return -1;
-		}
 	}
 	/* resume AGP if in use */
 	radeon_agp_resume(rdev);
@@ -1730,7 +1723,7 @@ int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon)
 	/* reset hpd state */
 	radeon_hpd_init(rdev);
 	/* blat the mode back in */
-	if (fbcon) {
+	if (notify_clients) {
 		drm_helper_resume_force_mode(dev);
 		/* turn on display hw */
 		drm_modeset_lock_all(dev);
@@ -1746,10 +1739,8 @@ int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon)
 	if ((rdev->pm.pm_method == PM_METHOD_DPM) && rdev->pm.dpm_enabled)
 		radeon_pm_compute_clocks(rdev);
 
-	if (fbcon) {
-		radeon_fbdev_set_suspend(rdev, 0);
-		console_unlock();
-	}
+	if (notify_clients)
+		drm_client_dev_resume(dev);
 
 	return 0;
 }

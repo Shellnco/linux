@@ -19,6 +19,10 @@
 #include <linux/user_namespace.h>
 #include <uapi/linux/xattr.h>
 
+/* List of all open_how "versions". */
+#define XATTR_ARGS_SIZE_VER0	16 /* sizeof first published struct */
+#define XATTR_ARGS_SIZE_LATEST	XATTR_ARGS_SIZE_VER0
+
 struct inode;
 struct dentry;
 
@@ -81,12 +85,12 @@ int __vfs_setxattr_noperm(struct mnt_idmap *, struct dentry *,
 			  const char *, const void *, size_t, int);
 int __vfs_setxattr_locked(struct mnt_idmap *, struct dentry *,
 			  const char *, const void *, size_t, int,
-			  struct inode **);
+			  struct delegated_inode *);
 int vfs_setxattr(struct mnt_idmap *, struct dentry *, const char *,
 		 const void *, size_t, int);
 int __vfs_removexattr(struct mnt_idmap *, struct dentry *, const char *);
 int __vfs_removexattr_locked(struct mnt_idmap *, struct dentry *,
-			     const char *, struct inode **);
+			     const char *, struct delegated_inode *);
 int vfs_removexattr(struct mnt_idmap *, struct dentry *, const char *);
 
 ssize_t generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size);
@@ -110,7 +114,7 @@ struct simple_xattr {
 	struct rb_node rb_node;
 	char *name;
 	size_t size;
-	char value[];
+	char value[] __counted_by(size);
 };
 
 void simple_xattrs_init(struct simple_xattrs *xattrs);

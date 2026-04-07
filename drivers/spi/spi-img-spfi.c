@@ -587,7 +587,6 @@ static int img_spfi_probe(struct platform_device *pdev)
 	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_TX_DUAL | SPI_RX_DUAL;
 	if (of_property_read_bool(spfi->dev->of_node, "img,supports-quad-mode"))
 		host->mode_bits |= SPI_TX_QUAD | SPI_RX_QUAD;
-	host->dev.of_node = pdev->dev.of_node;
 	host->bits_per_word_mask = SPI_BPW_MASK(32) | SPI_BPW_MASK(8);
 	host->max_speed_hz = clk_get_rate(spfi->spfi_clk) / 4;
 	host->min_speed_hz = clk_get_rate(spfi->spfi_clk) / 512;
@@ -756,7 +755,7 @@ static struct platform_driver img_spfi_driver = {
 		.of_match_table = of_match_ptr(img_spfi_of_match),
 	},
 	.probe = img_spfi_probe,
-	.remove_new = img_spfi_remove,
+	.remove = img_spfi_remove,
 };
 module_platform_driver(img_spfi_driver);
 

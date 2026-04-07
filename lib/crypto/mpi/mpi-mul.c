@@ -11,6 +11,8 @@
  *	 to avoid revealing of sensitive data due to paging etc.
  */
 
+#include <linux/export.h>
+
 #include "mpi-internal.h"
 
 int mpi_mul(MPI w, MPI u, MPI v)
@@ -21,7 +23,7 @@ int mpi_mul(MPI w, MPI u, MPI v)
 	int usign, vsign, sign_product;
 	int assign_wp = 0;
 	mpi_ptr_t tmp_limb = NULL;
-	int err;
+	int err = 0;
 
 	if (u->nlimbs < v->nlimbs) {
 		/* Swap U and V. */

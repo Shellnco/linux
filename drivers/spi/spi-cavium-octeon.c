@@ -54,7 +54,6 @@ static int octeon_spi_probe(struct platform_device *pdev)
 	host->bits_per_word_mask = SPI_BPW_MASK(8);
 	host->max_speed_hz = OCTEON_SPI_MAX_CLOCK_HZ;
 
-	host->dev.of_node = pdev->dev.of_node;
 	err = devm_spi_register_controller(&pdev->dev, host);
 	if (err) {
 		dev_err(&pdev->dev, "register host failed: %d\n", err);
@@ -90,7 +89,7 @@ static struct platform_driver octeon_spi_driver = {
 		.of_match_table = octeon_spi_match,
 	},
 	.probe		= octeon_spi_probe,
-	.remove_new	= octeon_spi_remove,
+	.remove		= octeon_spi_remove,
 };
 
 module_platform_driver(octeon_spi_driver);

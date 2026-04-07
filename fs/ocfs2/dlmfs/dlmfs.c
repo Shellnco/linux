@@ -20,6 +20,7 @@
 
 #include <linux/module.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
 #include <linux/pagemap.h>
 #include <linux/types.h>
 #include <linux/slab.h>
@@ -133,7 +134,7 @@ static int dlmfs_file_open(struct inode *inode,
 	 * doesn't make sense for LVB writes. */
 	file->f_flags &= ~O_APPEND;
 
-	fp = kmalloc(sizeof(*fp), GFP_NOFS);
+	fp = kmalloc_obj(*fp, GFP_NOFS);
 	if (!fp) {
 		status = -ENOMEM;
 		goto bail;
@@ -401,10 +402,10 @@ static struct inode *dlmfs_get_inode(struct inode *parent,
  * File creation. Allocate an inode, and we're done..
  */
 /* SMP-safe */
-static int dlmfs_mkdir(struct mnt_idmap * idmap,
-		       struct inode * dir,
-		       struct dentry * dentry,
-		       umode_t mode)
+static struct dentry *dlmfs_mkdir(struct mnt_idmap * idmap,
+				  struct inode * dir,
+				  struct dentry * dentry,
+				  umode_t mode)
 {
 	int status;
 	struct inode *inode = NULL;
@@ -440,14 +441,13 @@ static int dlmfs_mkdir(struct mnt_idmap * idmap,
 	ip->ip_conn = conn;
 
 	inc_nlink(dir);
-	d_instantiate(dentry, inode);
-	dget(dentry);	/* Extra count - pin the dentry in core */
+	d_make_persistent(dentry, inode);
 
 	status = 0;
 bail:
 	if (status < 0)
 		iput(inode);
-	return status;
+	return ERR_PTR(status);
 }
 
 static int dlmfs_create(struct mnt_idmap *idmap,
@@ -479,8 +479,7 @@ static int dlmfs_create(struct mnt_idmap *idmap,
 		goto bail;
 	}
 
-	d_instantiate(dentry, inode);
-	dget(dentry);	/* Extra count - pin the dentry in core */
+	d_make_persistent(dentry, inode);
 bail:
 	return status;
 }
@@ -506,9 +505,7 @@ bail:
 	return status;
 }
 
-static int dlmfs_fill_super(struct super_block * sb,
-			    void * data,
-			    int silent)
+static int dlmfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_blocksize = PAGE_SIZE;
@@ -548,7 +545,7 @@ static const struct super_operations dlmfs_ops = {
 	.alloc_inode	= dlmfs_alloc_inode,
 	.free_inode	= dlmfs_free_inode,
 	.evict_inode	= dlmfs_evict_inode,
-	.drop_inode	= generic_delete_inode,
+	.drop_inode	= inode_just_drop,
 };
 
 static const struct inode_operations dlmfs_file_inode_operations = {
@@ -556,17 +553,27 @@ static const struct inode_operations dlmfs_file_inode_operations = {
 	.setattr	= dlmfs_file_setattr,
 };
 
-static struct dentry *dlmfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int dlmfs_get_tree(struct fs_context *fc)
 {
-	return mount_nodev(fs_type, flags, data, dlmfs_fill_super);
+	return get_tree_nodev(fc, dlmfs_fill_super);
+}
+
+static const struct fs_context_operations dlmfs_context_ops = {
+	.get_tree       = dlmfs_get_tree,
+};
+
+static int dlmfs_init_fs_context(struct fs_context *fc)
+{
+	fc->ops = &dlmfs_context_ops;
+
+	return 0;
 }
 
 static struct file_system_type dlmfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "ocfs2_dlmfs",
-	.mount		= dlmfs_mount,
-	.kill_sb	= kill_litter_super,
+	.kill_sb	= kill_anon_super,
+	.init_fs_context = dlmfs_init_fs_context,
 };
 MODULE_ALIAS_FS("ocfs2_dlmfs");
 
@@ -586,7 +593,8 @@ static int __init init_dlmfs_fs(void)
 	}
 	cleanup_inode = 1;
 
-	user_dlm_worker = alloc_workqueue("user_dlm", WQ_MEM_RECLAIM, 0);
+	user_dlm_worker = alloc_workqueue("user_dlm",
+					  WQ_MEM_RECLAIM | WQ_PERCPU, 0);
 	if (!user_dlm_worker) {
 		status = -ENOMEM;
 		goto bail;

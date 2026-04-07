@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/export.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/irq_work.h>
@@ -7,20 +6,13 @@
 #include <linux/kvm_para.h>
 #include <linux/reboot.h>
 #include <linux/static_call.h>
+#include <linux/sched/cputime.h>
 #include <asm/paravirt.h>
 
 static int has_steal_clock;
-struct static_key paravirt_steal_enabled;
-struct static_key paravirt_steal_rq_enabled;
 static DEFINE_PER_CPU(struct kvm_steal_time, steal_time) __aligned(64);
+static DEFINE_STATIC_KEY_FALSE(virt_preempt_key);
 DEFINE_STATIC_KEY_FALSE(virt_spin_lock_key);
-
-static u64 native_steal_clock(int cpu)
-{
-	return 0;
-}
-
-DEFINE_STATIC_CALL(pv_steal_clock, native_steal_clock);
 
 static bool steal_acc = true;
 
@@ -51,10 +43,17 @@ static u64 paravt_steal_clock(int cpu)
 }
 
 #ifdef CONFIG_SMP
+static struct smp_ops native_ops;
+
 static void pv_send_ipi_single(int cpu, unsigned int action)
 {
 	int min, old;
 	irq_cpustat_t *info = &per_cpu(irq_stat, cpu);
+
+	if (unlikely(action == ACTION_BOOT_CPU)) {
+		native_ops.send_ipi_single(cpu, action);
+		return;
+	}
 
 	old = atomic_fetch_or(BIT(action), &info->message);
 	if (old)
@@ -74,6 +73,11 @@ static void pv_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 
 	if (cpumask_empty(mask))
 		return;
+
+	if (unlikely(action == ACTION_BOOT_CPU)) {
+		native_ops.send_ipi_mask(mask, action);
+		return;
+	}
 
 	action = BIT(action);
 	for_each_cpu(i, mask) {
@@ -147,6 +151,8 @@ static void pv_init_ipi(void)
 {
 	int r, swi;
 
+	/* Init native ipi irq for ACTION_BOOT_CPU */
+	native_ops.init_ipi();
 	swi = get_percpu_irq(INT_SWI0);
 	if (swi < 0)
 		panic("SWI0 IRQ mapping failed\n");
@@ -193,6 +199,7 @@ int __init pv_ipi_init(void)
 		return 0;
 
 #ifdef CONFIG_SMP
+	native_ops		= mp_ops;
 	mp_ops.init_ipi		= pv_init_ipi;
 	mp_ops.send_ipi_single	= pv_send_ipi_single;
 	mp_ops.send_ipi_mask	= pv_send_ipi_mask;
@@ -253,6 +260,18 @@ static int pv_time_cpu_down_prepare(unsigned int cpu)
 
 	return 0;
 }
+
+bool vcpu_is_preempted(int cpu)
+{
+	struct kvm_steal_time *src;
+
+	if (!static_branch_unlikely(&virt_preempt_key))
+		return false;
+
+	src = &per_cpu(steal_time, cpu);
+	return !!(src->preempted & KVM_VCPU_PREEMPTED);
+}
+EXPORT_SYMBOL(vcpu_is_preempted);
 #endif
 
 static void pv_cpu_reboot(void *unused)
@@ -294,6 +313,9 @@ int __init pv_time_init(void)
 		pr_err("Failed to install cpu hotplug callbacks\n");
 		return r;
 	}
+
+	if (kvm_para_has_feature(KVM_FEATURE_PREEMPT))
+		static_branch_enable(&virt_preempt_key);
 #endif
 
 	static_call_update(pv_steal_clock, paravt_steal_clock);
@@ -304,7 +326,10 @@ int __init pv_time_init(void)
 		static_key_slow_inc(&paravirt_steal_rq_enabled);
 #endif
 
-	pr_info("Using paravirt steal-time\n");
+	if (static_key_enabled(&virt_preempt_key))
+		pr_info("Using paravirt steal-time with preempt enabled\n");
+	else
+		pr_info("Using paravirt steal-time with preempt disabled\n");
 
 	return 0;
 }

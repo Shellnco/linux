@@ -635,7 +635,7 @@ xilinx_dpdma_chan_alloc_tx_desc(struct xilinx_dpdma_chan *chan)
 {
 	struct xilinx_dpdma_tx_desc *tx_desc;
 
-	tx_desc = kzalloc(sizeof(*tx_desc), GFP_NOWAIT);
+	tx_desc = kzalloc_obj(*tx_desc, GFP_NOWAIT);
 	if (!tx_desc)
 		return NULL;
 
@@ -1863,7 +1863,7 @@ MODULE_DEVICE_TABLE(of, xilinx_dpdma_of_match);
 
 static struct platform_driver xilinx_dpdma_driver = {
 	.probe			= xilinx_dpdma_probe,
-	.remove_new		= xilinx_dpdma_remove,
+	.remove			= xilinx_dpdma_remove,
 	.driver			= {
 		.name		= "xilinx-zynqmp-dpdma",
 		.of_match_table	= xilinx_dpdma_of_match,

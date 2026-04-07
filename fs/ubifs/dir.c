@@ -1002,8 +1002,8 @@ out_fname:
 	return err;
 }
 
-static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-		       struct dentry *dentry, umode_t mode)
+static struct dentry *ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+				  struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	struct ubifs_inode *dir_ui = ubifs_inode(dir);
@@ -1023,7 +1023,7 @@ static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	err = ubifs_budget_space(c, &req);
 	if (err)
-		return err;
+		return ERR_PTR(err);
 
 	err = ubifs_prepare_create(dir, dentry, &nm);
 	if (err)
@@ -1060,7 +1060,7 @@ static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	ubifs_release_budget(c, &req);
 	d_instantiate(dentry, inode);
 	fscrypt_free_filename(&nm);
-	return 0;
+	return NULL;
 
 out_cancel:
 	dir->i_size -= sz_change;
@@ -1074,7 +1074,7 @@ out_fname:
 	fscrypt_free_filename(&nm);
 out_budg:
 	ubifs_release_budget(c, &req);
-	return err;
+	return ERR_PTR(err);
 }
 
 static int ubifs_mknod(struct mnt_idmap *idmap, struct inode *dir,
@@ -1099,7 +1099,7 @@ static int ubifs_mknod(struct mnt_idmap *idmap, struct inode *dir,
 	dbg_gen("dent '%pd' in dir ino %lu", dentry, dir->i_ino);
 
 	if (S_ISBLK(mode) || S_ISCHR(mode)) {
-		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
+		dev = kmalloc_obj(union ubifs_dev_desc, GFP_NOFS);
 		if (!dev)
 			return -ENOMEM;
 		devlen = ubifs_encode_dev(dev, rdev);
@@ -1399,7 +1399,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 	if (flags & RENAME_WHITEOUT) {
 		union ubifs_dev_desc *dev = NULL;
 
-		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
+		dev = kmalloc_obj(union ubifs_dev_desc, GFP_NOFS);
 		if (!dev) {
 			err = -ENOMEM;
 			goto out_release;
@@ -1725,7 +1725,7 @@ static int ubifs_dir_open(struct inode *inode, struct file *file)
 {
 	struct ubifs_dir_data *data;
 
-	data = kzalloc(sizeof(struct ubifs_dir_data), GFP_KERNEL);
+	data = kzalloc_obj(struct ubifs_dir_data);
 	if (!data)
 		return -ENOMEM;
 	file->private_data = data;

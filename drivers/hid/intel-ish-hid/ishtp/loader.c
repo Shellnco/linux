@@ -195,13 +195,19 @@ static int prepare_dma_bufs(struct ishtp_device *dev,
 	return 0;
 }
 
+/* Patterns with PRODUCT_FAMILY */
+#define ISH_FW_FILE_VENDOR_FAMILY_NAME_SKU_FMT "intel/ish/ish_%s_%08x_%08x_%08x_%08x.bin"
+#define ISH_FW_FILE_VENDOR_FAMILY_SKU_FMT "intel/ish/ish_%s_%08x_%08x_%08x.bin"
+#define ISH_FW_FILE_VENDOR_FAMILY_NAME_FMT "intel/ish/ish_%s_%08x_%08x_%08x.bin"
+#define ISH_FW_FILE_VENDOR_FAMILY_FMT "intel/ish/ish_%s_%08x_%08x.bin"
+
 #define ISH_FW_FILE_VENDOR_NAME_SKU_FMT "intel/ish/ish_%s_%08x_%08x_%08x.bin"
 #define ISH_FW_FILE_VENDOR_SKU_FMT "intel/ish/ish_%s_%08x_%08x.bin"
 #define ISH_FW_FILE_VENDOR_NAME_FMT "intel/ish/ish_%s_%08x_%08x.bin"
 #define ISH_FW_FILE_VENDOR_FMT "intel/ish/ish_%s_%08x.bin"
 #define ISH_FW_FILE_DEFAULT_FMT "intel/ish/ish_%s.bin"
 
-#define ISH_FW_FILENAME_LEN_MAX 56
+#define ISH_FW_FILENAME_LEN_MAX 72
 
 #define ISH_CRC_INIT (~0u)
 #define ISH_CRC_XOROUT (~0u)
@@ -228,6 +234,12 @@ static int _request_ish_firmware(const struct firmware **firmware_p,
  * for the given device in the following order, prioritizing custom firmware
  * with more precise matching patterns:
  *
+ *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_FAMILY_CRC32)
+ *   _$(PRODUCT_NAME_CRC32)_${PRODUCT_SKU_CRC32}.bin
+ *
+ *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_FAMILY_CRC32)_${PRODUCT_SKU_CRC32}.bin
+ *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_FAMILY_CRC32)_$(PRODUCT_NAME_CRC32).bin
+ *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_FAMILY_CRC32).bin
  *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_NAME_CRC32)_${PRODUCT_SKU_CRC32}.bin
  *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_${PRODUCT_SKU_CRC32}.bin
  *   ish_${fw_generation}_${SYS_VENDOR_CRC32}_$(PRODUCT_NAME_CRC32).bin
@@ -256,8 +268,9 @@ static int request_ish_firmware(const struct firmware **firmware_p,
 				struct device *dev)
 {
 	const char *gen, *sys_vendor, *product_name, *product_sku;
+	const char *product_family;
 	struct ishtp_device *ishtp = dev_get_drvdata(dev);
-	u32 vendor_crc, name_crc, sku_crc;
+	u32 vendor_crc, name_crc, sku_crc, family_crc;
 	char filename[ISH_FW_FILENAME_LEN_MAX];
 	int ret;
 
@@ -265,13 +278,54 @@ static int request_ish_firmware(const struct firmware **firmware_p,
 	sys_vendor = dmi_get_system_info(DMI_SYS_VENDOR);
 	product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
 	product_sku = dmi_get_system_info(DMI_PRODUCT_SKU);
+	product_family = dmi_get_system_info(DMI_PRODUCT_FAMILY);
 
 	if (sys_vendor)
 		vendor_crc = crc32(ISH_CRC_INIT, sys_vendor, strlen(sys_vendor)) ^ ISH_CRC_XOROUT;
+	if (product_family)
+		family_crc = crc32(ISH_CRC_INIT, product_family,
+				   strlen(product_family)) ^ ISH_CRC_XOROUT;
 	if (product_name)
 		name_crc = crc32(ISH_CRC_INIT, product_name, strlen(product_name)) ^ ISH_CRC_XOROUT;
 	if (product_sku)
 		sku_crc = crc32(ISH_CRC_INIT, product_sku, strlen(product_sku)) ^ ISH_CRC_XOROUT;
+
+	/* PRODUCT_FAMILY-extended matching */
+	if (sys_vendor && product_family && product_name && product_sku) {
+		snprintf(filename, sizeof(filename),
+			 ISH_FW_FILE_VENDOR_FAMILY_NAME_SKU_FMT,
+			 gen, vendor_crc, family_crc, name_crc, sku_crc);
+		ret = _request_ish_firmware(firmware_p, filename, dev);
+		if (!ret)
+			return 0;
+	}
+
+	if (sys_vendor && product_family && product_sku) {
+		snprintf(filename, sizeof(filename),
+			 ISH_FW_FILE_VENDOR_FAMILY_SKU_FMT,
+			 gen, vendor_crc, family_crc, sku_crc);
+		ret = _request_ish_firmware(firmware_p, filename, dev);
+		if (!ret)
+			return 0;
+	}
+
+	if (sys_vendor && product_family && product_name) {
+		snprintf(filename, sizeof(filename),
+			 ISH_FW_FILE_VENDOR_FAMILY_NAME_FMT,
+			 gen, vendor_crc, family_crc, name_crc);
+		ret = _request_ish_firmware(firmware_p, filename, dev);
+		if (!ret)
+			return 0;
+	}
+
+	if (sys_vendor && product_family) {
+		snprintf(filename, sizeof(filename),
+			 ISH_FW_FILE_VENDOR_FAMILY_FMT,
+			 gen, vendor_crc, family_crc);
+		ret = _request_ish_firmware(firmware_p, filename, dev);
+		if (!ret)
+			return 0;
+}
 
 	if (sys_vendor && product_name && product_sku) {
 		snprintf(filename, sizeof(filename), ISH_FW_FILE_VENDOR_NAME_SKU_FMT, gen,
@@ -308,6 +362,28 @@ static int request_ish_firmware(const struct firmware **firmware_p,
 	return _request_ish_firmware(firmware_p, filename, dev);
 }
 
+static int copy_manifest(const struct firmware *fw, struct ish_global_manifest *manifest)
+{
+	u32 offset;
+
+	for (offset = 0; offset + sizeof(*manifest) < fw->size; offset += ISH_MANIFEST_ALIGNMENT) {
+		memcpy(manifest, fw->data + offset, sizeof(*manifest));
+
+		if (le32_to_cpu(manifest->sig_fourcc) == ISH_GLOBAL_SIG)
+			return 0;
+	}
+
+	return -1;
+}
+
+static void copy_ish_version(struct version_in_manifest *src, struct ish_version *dst)
+{
+	dst->major = le16_to_cpu(src->major);
+	dst->minor = le16_to_cpu(src->minor);
+	dst->hotfix = le16_to_cpu(src->hotfix);
+	dst->build = le16_to_cpu(src->build);
+}
+
 /**
  * ishtp_loader_work() - Load the ISHTP firmware
  * @work: The work structure
@@ -336,6 +412,7 @@ void ishtp_loader_work(struct work_struct *work)
 	struct loader_xfer_query query = { .header = cpu_to_le32(query_hdr.val32), };
 	struct loader_start start = { .header = cpu_to_le32(start_hdr.val32), };
 	union loader_recv_message recv_msg;
+	struct ish_global_manifest manifest;
 	const struct firmware *ish_fw;
 	void *dma_bufs[FRAGMENT_MAX_NUM] = {};
 	u32 fragment_size;
@@ -372,7 +449,7 @@ void ishtp_loader_work(struct work_struct *work)
 		if (rv)
 			continue; /* try again if failed */
 
-		dev_dbg(dev->devc, "ISH Version %u.%u.%u.%u\n",
+		dev_dbg(dev->devc, "ISH Bootloader Version %u.%u.%u.%u\n",
 			recv_msg.query_ack.version_major,
 			recv_msg.query_ack.version_minor,
 			recv_msg.query_ack.version_hotfix,
@@ -390,6 +467,16 @@ void ishtp_loader_work(struct work_struct *work)
 			continue; /* try again if failed */
 
 		dev_info(dev->devc, "firmware loaded. size:%zu\n", ish_fw->size);
+		if (!copy_manifest(ish_fw, &manifest)) {
+			copy_ish_version(&manifest.base_ver, &dev->base_ver);
+			copy_ish_version(&manifest.prj_ver, &dev->prj_ver);
+			dev_info(dev->devc, "FW base version: %u.%u.%u.%u\n",
+				 dev->base_ver.major, dev->base_ver.minor,
+				 dev->base_ver.hotfix, dev->base_ver.build);
+			dev_info(dev->devc, "FW project version: %u.%u.%u.%u\n",
+				 dev->prj_ver.major, dev->prj_ver.minor,
+				 dev->prj_ver.hotfix, dev->prj_ver.build);
+		}
 		break;
 	} while (--retry);
 

@@ -208,7 +208,7 @@ static int acpi_ac_probe(struct platform_device *pdev)
 	struct acpi_ac *ac;
 	int result;
 
-	ac = kzalloc(sizeof(struct acpi_ac), GFP_KERNEL);
+	ac = kzalloc_obj(struct acpi_ac);
 	if (!ac)
 		return -ENOMEM;
 
@@ -290,7 +290,7 @@ static void acpi_ac_remove(struct platform_device *pdev)
 
 static struct platform_driver acpi_ac_driver = {
 	.probe = acpi_ac_probe,
-	.remove_new = acpi_ac_remove,
+	.remove = acpi_ac_remove,
 	.driver = {
 		.name = "ac",
 		.acpi_match_table = ac_device_ids,

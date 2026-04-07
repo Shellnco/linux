@@ -1091,7 +1091,6 @@ static int spi_qup_probe(struct platform_device *pdev)
 	host->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 32);
 	host->max_speed_hz = max_freq;
 	host->transfer_one = spi_qup_transfer_one;
-	host->dev.of_node = pdev->dev.of_node;
 	host->auto_runtime_pm = true;
 	host->dma_alignment = dma_get_cache_alignment();
 	host->max_dma_len = SPI_MAX_XFER;
@@ -1364,7 +1363,7 @@ static struct platform_driver spi_qup_driver = {
 		.of_match_table = spi_qup_dt_match,
 	},
 	.probe = spi_qup_probe,
-	.remove_new = spi_qup_remove,
+	.remove = spi_qup_remove,
 };
 module_platform_driver(spi_qup_driver);
 

@@ -138,4 +138,41 @@ int pinconf_generic_parse_dt_config(struct device_node *np,
 				    struct pinctrl_dev *pctldev,
 				    unsigned long **configs,
 				    unsigned int *nconfigs);
+
+int pinconf_generic_parse_dt_pinmux(struct device_node *np, struct device *dev,
+				    unsigned int **pid, unsigned int **pmux,
+				    unsigned int *npins);
+#else
+static inline int
+pinconf_generic_parse_dt_config(struct device_node *np,
+				struct pinctrl_dev *pctldev,
+				unsigned long **configs,
+				unsigned int *nconfigs)
+{
+	return -ENOTSUPP;
+}
+
+static inline int
+pinconf_generic_parse_dt_pinmux(struct device_node *np, struct device *dev,
+				unsigned int **pid, unsigned int **pmux,
+				unsigned int *npins)
+{
+	return -ENOTSUPP;
+}
+#endif
+
+#if defined(CONFIG_GENERIC_PINCTRL) && defined (CONFIG_OF)
+int pinctrl_generic_pins_function_dt_node_to_map(struct pinctrl_dev *pctldev,
+						 struct device_node *np,
+						 struct pinctrl_map **maps,
+						 unsigned int *num_maps);
+#else
+static inline int
+pinctrl_generic_pins_function_dt_node_to_map(struct pinctrl_dev *pctldev,
+					     struct device_node *np,
+					     struct pinctrl_map **maps,
+					     unsigned int *num_maps)
+{
+	return -ENOTSUPP;
+}
 #endif

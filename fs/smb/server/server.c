@@ -21,6 +21,7 @@
 #include "mgmt/user_session.h"
 #include "crypto_ctx.h"
 #include "auth.h"
+#include "stats.h"
 
 int ksmbd_debug_types;
 
@@ -47,7 +48,7 @@ static int ___server_conf_set(int idx, char *val)
 		return -EINVAL;
 
 	kfree(server_conf.conf[idx]);
-	server_conf.conf[idx] = kstrdup(val, GFP_KERNEL);
+	server_conf.conf[idx] = kstrdup(val, KSMBD_DEFAULT_GFP);
 	if (!server_conf.conf[idx])
 		return -ENOMEM;
 	return 0;
@@ -95,7 +96,7 @@ static inline int check_conn_state(struct ksmbd_work *work)
 
 	if (ksmbd_conn_exiting(work->conn) ||
 	    ksmbd_conn_need_reconnect(work->conn)) {
-		rsp_hdr = work->response_buf;
+		rsp_hdr = smb_get_msg(work->response_buf);
 		rsp_hdr->Status.CifsError = STATUS_CONNECTION_DISCONNECTED;
 		return 1;
 	}
@@ -126,25 +127,27 @@ static int __process_request(struct ksmbd_work *work, struct ksmbd_conn *conn,
 andx_again:
 	if (command >= conn->max_cmds) {
 		conn->ops->set_rsp_status(work, STATUS_INVALID_PARAMETER);
-		return SERVER_HANDLER_CONTINUE;
+		return SERVER_HANDLER_ABORT;
 	}
 
 	cmds = &conn->cmds[command];
 	if (!cmds->proc) {
 		ksmbd_debug(SMB, "*** not implemented yet cmd = %x\n", command);
 		conn->ops->set_rsp_status(work, STATUS_NOT_IMPLEMENTED);
-		return SERVER_HANDLER_CONTINUE;
+		return SERVER_HANDLER_ABORT;
 	}
 
 	if (work->sess && conn->ops->is_sign_req(work, command)) {
 		ret = conn->ops->check_sign_req(work);
 		if (!ret) {
 			conn->ops->set_rsp_status(work, STATUS_ACCESS_DENIED);
-			return SERVER_HANDLER_CONTINUE;
+			return SERVER_HANDLER_ABORT;
 		}
 	}
 
 	ret = cmds->proc(work);
+	if (conn->ops->inc_reqs)
+		conn->ops->inc_reqs(command);
 
 	if (ret < 0)
 		ksmbd_debug(CONN, "Failed to process %u [%d]\n", command, ret);
@@ -247,6 +250,8 @@ send:
 		if (rc < 0)
 			conn->ops->set_rsp_status(work, STATUS_DATA_ERROR);
 	}
+	if (work->sess)
+		ksmbd_user_session_put(work->sess);
 
 	ksmbd_conn_write(work);
 }
@@ -268,13 +273,7 @@ static void handle_ksmbd_work(struct work_struct *wk)
 
 	ksmbd_conn_try_dequeue_request(work);
 	ksmbd_free_work_struct(work);
-	/*
-	 * Checking waitqueue to dropping pending requests on
-	 * disconnection. waitqueue_active is safe because it
-	 * uses atomic operation for condition.
-	 */
-	if (!atomic_dec_return(&conn->r_count) && waitqueue_active(&conn->r_count_q))
-		wake_up(&conn->r_count_q);
+	ksmbd_conn_r_count_dec(conn);
 }
 
 /**
@@ -289,6 +288,10 @@ static int queue_ksmbd_work(struct ksmbd_conn *conn)
 	struct ksmbd_work *work;
 	int err;
 
+	err = ksmbd_init_smb_server(conn);
+	if (err)
+		return 0;
+
 	work = ksmbd_alloc_work_struct();
 	if (!work) {
 		pr_err("allocation for work failed\n");
@@ -299,14 +302,8 @@ static int queue_ksmbd_work(struct ksmbd_conn *conn)
 	work->request_buf = conn->request_buf;
 	conn->request_buf = NULL;
 
-	err = ksmbd_init_smb_server(work);
-	if (err) {
-		ksmbd_free_work_struct(work);
-		return 0;
-	}
-
 	ksmbd_conn_enqueue_request(work);
-	atomic_inc(&conn->r_count);
+	ksmbd_conn_r_count_inc(conn);
 	/* update activity on connection */
 	conn->last_active = jiffies;
 	INIT_WORK(&work->work, handle_ksmbd_work);
@@ -357,6 +354,7 @@ static int server_conf_init(void)
 	server_conf.auth_mechs |= KSMBD_AUTH_KRB5 |
 				KSMBD_AUTH_MSKRB5;
 #endif
+	server_conf.max_inflight_req = SMB2_MAX_CREDITS;
 	return 0;
 }
 
@@ -364,12 +362,14 @@ static void server_ctrl_handle_init(struct server_ctrl_struct *ctrl)
 {
 	int ret;
 
+	ksmbd_proc_reset();
 	ret = ksmbd_conn_transport_init();
 	if (ret) {
 		server_queue_ctrl_reset_work();
 		return;
 	}
 
+	pr_info("running\n");
 	WRITE_ONCE(server_conf.state, SERVER_STATE_RUNNING);
 }
 
@@ -409,7 +409,7 @@ static int __queue_ctrl_work(int type)
 {
 	struct server_ctrl_struct *ctrl;
 
-	ctrl = kmalloc(sizeof(struct server_ctrl_struct), GFP_KERNEL);
+	ctrl = kmalloc_obj(struct server_ctrl_struct, KSMBD_DEFAULT_GFP);
 	if (!ctrl)
 		return -ENOMEM;
 
@@ -535,6 +535,7 @@ static int ksmbd_server_shutdown(void)
 {
 	WRITE_ONCE(server_conf.state, SERVER_STATE_SHUTTING_DOWN);
 
+	ksmbd_proc_cleanup();
 	class_unregister(&ksmbd_control_class);
 	ksmbd_workqueue_destroy();
 	ksmbd_ipc_release();
@@ -557,6 +558,9 @@ static int __init ksmbd_server_init(void)
 		pr_err("Unable to register ksmbd-control class\n");
 		return ret;
 	}
+
+	ksmbd_proc_init();
+	create_proc_sessions();
 
 	ksmbd_server_tcp_callbacks_init();
 
@@ -626,16 +630,11 @@ MODULE_AUTHOR("Namjae Jeon <linkinjeon@kernel.org>");
 MODULE_DESCRIPTION("Linux kernel CIFS/SMB SERVER");
 MODULE_LICENSE("GPL");
 MODULE_SOFTDEP("pre: ecb");
-MODULE_SOFTDEP("pre: hmac");
-MODULE_SOFTDEP("pre: md5");
 MODULE_SOFTDEP("pre: nls");
 MODULE_SOFTDEP("pre: aes");
 MODULE_SOFTDEP("pre: cmac");
-MODULE_SOFTDEP("pre: sha256");
-MODULE_SOFTDEP("pre: sha512");
 MODULE_SOFTDEP("pre: aead2");
 MODULE_SOFTDEP("pre: ccm");
 MODULE_SOFTDEP("pre: gcm");
-MODULE_SOFTDEP("pre: crc32");
 module_init(ksmbd_server_init)
 module_exit(ksmbd_server_exit)

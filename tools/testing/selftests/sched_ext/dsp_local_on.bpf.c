@@ -43,9 +43,12 @@ void BPF_STRUCT_OPS(dsp_local_on_dispatch, s32 cpu, struct task_struct *prev)
 	if (!p)
 		return;
 
-	target = bpf_get_prandom_u32() % nr_cpus;
+	if (p->nr_cpus_allowed == nr_cpus && !is_migration_disabled(p))
+		target = bpf_get_prandom_u32() % nr_cpus;
+	else
+		target = scx_bpf_task_cpu(p);
 
-	scx_bpf_dispatch(p, SCX_DSQ_LOCAL_ON | target, SCX_SLICE_DFL, 0);
+	scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | target, SCX_SLICE_DFL, 0);
 	bpf_task_release(p);
 }
 
@@ -56,10 +59,10 @@ void BPF_STRUCT_OPS(dsp_local_on_exit, struct scx_exit_info *ei)
 
 SEC(".struct_ops.link")
 struct sched_ext_ops dsp_local_on_ops = {
-	.select_cpu		= dsp_local_on_select_cpu,
-	.enqueue		= dsp_local_on_enqueue,
-	.dispatch		= dsp_local_on_dispatch,
-	.exit			= dsp_local_on_exit,
+	.select_cpu		= (void *) dsp_local_on_select_cpu,
+	.enqueue		= (void *) dsp_local_on_enqueue,
+	.dispatch		= (void *) dsp_local_on_dispatch,
+	.exit			= (void *) dsp_local_on_exit,
 	.name			= "dsp_local_on",
 	.timeout_ms		= 1000U,
 };

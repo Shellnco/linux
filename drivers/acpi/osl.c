@@ -344,7 +344,7 @@ void __iomem __ref
 		goto out;
 	}
 
-	map = kzalloc(sizeof(*map), GFP_KERNEL);
+	map = kzalloc_obj(*map);
 	if (!map) {
 		mutex_unlock(&acpi_ioremap_lock);
 		return NULL;
@@ -398,7 +398,7 @@ static void acpi_os_drop_map_ref(struct acpi_ioremap *map)
 	list_del_rcu(&map->list);
 
 	INIT_RCU_WORK(&map->track.rwork, acpi_os_map_remove);
-	queue_rcu_work(system_wq, &map->track.rwork);
+	queue_rcu_work(system_percpu_wq, &map->track.rwork);
 }
 
 /**
@@ -607,7 +607,27 @@ acpi_status acpi_os_remove_interrupt_handler(u32 gsi, acpi_osd_handler handler)
 
 void acpi_os_sleep(u64 ms)
 {
-	msleep(ms);
+	u64 usec = ms * USEC_PER_MSEC, delta_us = 50;
+
+	/*
+	 * Use a hrtimer because the timer wheel timers are optimized for
+	 * cancelation before they expire and this timer is not going to be
+	 * canceled.
+	 *
+	 * Set the delta between the requested sleep time and the effective
+	 * deadline to at least 50 us in case there is an opportunity for timer
+	 * coalescing.
+	 *
+	 * Moreover, longer sleeps can be assumed to need somewhat less timer
+	 * precision, so sacrifice some of it for making the timer a more likely
+	 * candidate for coalescing by setting the delta to 1% of the sleep time
+	 * if it is above 5 ms (this value is chosen so that the delta is a
+	 * continuous function of the sleep time).
+	 */
+	if (ms > 5)
+		delta_us = (USEC_PER_MSEC / 100) * ms;
+
+	usleep_range(usec, usec + delta_us);
 }
 
 void acpi_os_stall(u32 us)
@@ -642,6 +662,15 @@ acpi_status acpi_os_read_port(acpi_io_address port, u32 *value, u32 width)
 {
 	u32 dummy;
 
+	if (!IS_ENABLED(CONFIG_HAS_IOPORT)) {
+		/*
+		 * set all-1 result as if reading from non-existing
+		 * I/O port
+		 */
+		*value = GENMASK(width, 0);
+		return AE_NOT_IMPLEMENTED;
+	}
+
 	if (value)
 		*value = 0;
 	else
@@ -665,6 +694,9 @@ EXPORT_SYMBOL(acpi_os_read_port);
 
 acpi_status acpi_os_write_port(acpi_io_address port, u32 value, u32 width)
 {
+	if (!IS_ENABLED(CONFIG_HAS_IOPORT))
+		return AE_NOT_IMPLEMENTED;
+
 	if (width <= 8) {
 		outb(value, port);
 	} else if (width <= 16) {
@@ -1085,7 +1117,7 @@ acpi_status acpi_os_execute(acpi_execute_type type,
 	 * having a static work_struct.
 	 */
 
-	dpc = kzalloc(sizeof(struct acpi_os_dpc), GFP_ATOMIC);
+	dpc = kzalloc_obj(struct acpi_os_dpc, GFP_ATOMIC);
 	if (!dpc)
 		return AE_NO_MEMORY;
 
@@ -1165,7 +1197,7 @@ acpi_status acpi_hotplug_schedule(struct acpi_device *adev, u32 src)
 			  "Scheduling hotplug event %u for deferred handling\n",
 			   src);
 
-	hpw = kmalloc(sizeof(*hpw), GFP_KERNEL);
+	hpw = kmalloc_obj(*hpw);
 	if (!hpw)
 		return AE_NO_MEMORY;
 
@@ -1649,7 +1681,7 @@ acpi_status __init acpi_os_initialize(void)
 		 * Use acpi_os_map_generic_address to pre-map the reset
 		 * register if it's in system memory.
 		 */
-		void *rv;
+		void __iomem *rv;
 
 		rv = acpi_os_map_generic_address(&acpi_gbl_FADT.reset_register);
 		pr_debug("%s: Reset register mapping %s\n", __func__,
@@ -1662,8 +1694,8 @@ acpi_status __init acpi_os_initialize(void)
 
 acpi_status __init acpi_os_initialize1(void)
 {
-	kacpid_wq = alloc_workqueue("kacpid", 0, 1);
-	kacpi_notify_wq = alloc_workqueue("kacpi_notify", 0, 0);
+	kacpid_wq = alloc_workqueue("kacpid", WQ_PERCPU, 1);
+	kacpi_notify_wq = alloc_workqueue("kacpi_notify", WQ_PERCPU, 0);
 	kacpi_hotplug_wq = alloc_ordered_workqueue("kacpi_hotplug", 0);
 	BUG_ON(!kacpid_wq);
 	BUG_ON(!kacpi_notify_wq);

@@ -500,7 +500,6 @@ static int bcmbca_hsspi_probe(struct platform_device *pdev)
 	mutex_init(&bs->msg_mutex);
 	init_completion(&bs->done);
 
-	host->dev.of_node = dev->of_node;
 	if (!dev->of_node)
 		host->bus_num = HSSPI_BUS_NUM;
 
@@ -633,7 +632,7 @@ static struct platform_driver bcmbca_hsspi_driver = {
 		   .of_match_table = bcmbca_hsspi_of_match,
 		   },
 	.probe = bcmbca_hsspi_probe,
-	.remove_new = bcmbca_hsspi_remove,
+	.remove = bcmbca_hsspi_remove,
 };
 
 module_platform_driver(bcmbca_hsspi_driver);

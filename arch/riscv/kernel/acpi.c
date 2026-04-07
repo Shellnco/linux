@@ -14,6 +14,7 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/efi-bgrt.h>
 #include <linux/efi.h>
 #include <linux/io.h>
 #include <linux/memblock.h>
@@ -160,6 +161,8 @@ done:
 			early_init_dt_scan_chosen_stdout();
 	} else {
 		acpi_parse_spcr(earlycon_acpi_spcr_enable, true);
+		if (IS_ENABLED(CONFIG_ACPI_BGRT))
+			acpi_table_parse(ACPI_SIG_BGRT, acpi_parse_bgrt);
 	}
 }
 
@@ -210,7 +213,7 @@ void __init __iomem *__acpi_map_table(unsigned long phys, unsigned long size)
 	if (!size)
 		return NULL;
 
-	return early_ioremap(phys, size);
+	return early_memremap(phys, size);
 }
 
 void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
@@ -218,7 +221,7 @@ void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
 	if (!map || !size)
 		return;
 
-	early_iounmap(map, size);
+	early_memunmap(map, size);
 }
 
 void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
@@ -305,7 +308,7 @@ void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
 		}
 	}
 
-	return ioremap_prot(phys, size, pgprot_val(prot));
+	return ioremap_prot(phys, size, prot);
 }
 
 #ifdef CONFIG_PCI

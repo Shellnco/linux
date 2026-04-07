@@ -401,7 +401,6 @@ static int npcm_pspi_probe(struct platform_device *pdev)
 	host->max_speed_hz = DIV_ROUND_UP(clk_hz, NPCM_PSPI_MIN_CLK_DIVIDER);
 	host->min_speed_hz = DIV_ROUND_UP(clk_hz, NPCM_PSPI_MAX_CLK_DIVIDER);
 	host->mode_bits = SPI_CPHA | SPI_CPOL;
-	host->dev.of_node = pdev->dev.of_node;
 	host->bus_num = -1;
 	host->bits_per_word_mask = SPI_BPW_MASK(8) | SPI_BPW_MASK(16);
 	host->transfer_one = npcm_pspi_transfer_one;
@@ -452,7 +451,7 @@ static struct platform_driver npcm_pspi_driver = {
 		.of_match_table	= npcm_pspi_match,
 	},
 	.probe		= npcm_pspi_probe,
-	.remove_new	= npcm_pspi_remove,
+	.remove		= npcm_pspi_remove,
 };
 module_platform_driver(npcm_pspi_driver);
 

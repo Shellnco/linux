@@ -15,11 +15,7 @@
 
 /* enough to cover all DEFINE_PER_CPUs in modules */
 #ifdef CONFIG_MODULES
-#ifdef CONFIG_MEM_ALLOC_PROFILING
-#define PERCPU_MODULE_RESERVE		(8 << 13)
-#else
 #define PERCPU_MODULE_RESERVE		(8 << 10)
-#endif
 #else
 #define PERCPU_MODULE_RESERVE		0
 #endif
@@ -41,7 +37,11 @@
 					 PCPU_MIN_ALLOC_SHIFT)
 
 #ifdef CONFIG_RANDOM_KMALLOC_CACHES
-#define PERCPU_DYNAMIC_SIZE_SHIFT      12
+# if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PAGE_SIZE_4KB)
+# define PERCPU_DYNAMIC_SIZE_SHIFT      13
+# else
+# define PERCPU_DYNAMIC_SIZE_SHIFT      12
+#endif /* LOCKDEP and PAGE_SIZE > 4KiB */
 #else
 #define PERCPU_DYNAMIC_SIZE_SHIFT      10
 #endif

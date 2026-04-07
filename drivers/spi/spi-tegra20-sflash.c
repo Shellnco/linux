@@ -505,7 +505,6 @@ static int tegra_sflash_probe(struct platform_device *pdev)
 	tegra_sflash_writel(tsd, tsd->def_command_reg, SPI_COMMAND);
 	pm_runtime_put(&pdev->dev);
 
-	host->dev.of_node = pdev->dev.of_node;
 	ret = devm_spi_register_controller(&pdev->dev, host);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "can not register to host err %d\n", ret);
@@ -600,7 +599,7 @@ static struct platform_driver tegra_sflash_driver = {
 		.of_match_table	= tegra_sflash_of_match,
 	},
 	.probe =	tegra_sflash_probe,
-	.remove_new =	tegra_sflash_remove,
+	.remove =	tegra_sflash_remove,
 };
 module_platform_driver(tegra_sflash_driver);
 

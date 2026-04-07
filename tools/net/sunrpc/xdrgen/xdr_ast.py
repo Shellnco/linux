@@ -12,12 +12,53 @@ from lark.tree import Meta
 
 this_module = sys.modules[__name__]
 
+big_endian = []
 excluded_apis = []
 header_name = "none"
 public_apis = []
-enums = set()
 structs = set()
 pass_by_reference = set()
+
+constants = {}
+
+
+def xdr_quadlen(val: str) -> int:
+    """Return integer XDR width of an XDR type"""
+    if val in constants:
+        octets = constants[val]
+    else:
+        octets = int(val)
+    return int((octets + 3) / 4)
+
+
+symbolic_widths = {
+    "void": ["XDR_void"],
+    "bool": ["XDR_bool"],
+    "short": ["XDR_short"],
+    "unsigned_short": ["XDR_unsigned_short"],
+    "int": ["XDR_int"],
+    "unsigned_int": ["XDR_unsigned_int"],
+    "long": ["XDR_long"],
+    "unsigned_long": ["XDR_unsigned_long"],
+    "hyper": ["XDR_hyper"],
+    "unsigned_hyper": ["XDR_unsigned_hyper"],
+}
+
+# Numeric XDR widths are tracked in a dictionary that is keyed
+# by type_name because sometimes a caller has nothing more than
+# the type_name to use to figure out the numeric width.
+max_widths = {
+    "void": 0,
+    "bool": 1,
+    "short": 1,
+    "unsigned_short": 1,
+    "int": 1,
+    "unsigned_int": 1,
+    "long": 1,
+    "unsigned_long": 1,
+    "hyper": 2,
+    "unsigned_hyper": 2,
+}
 
 
 @dataclass
@@ -51,17 +92,30 @@ class _XdrTypeSpecifier(_XdrAst):
     """Corresponds to 'type_specifier' in the XDR language grammar"""
 
     type_name: str
-    c_classifier: str
+    c_classifier: str = ""
 
 
 @dataclass
 class _XdrDefinedType(_XdrTypeSpecifier):
     """Corresponds to a type defined by the input specification"""
 
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return [get_header_name().upper() + "_" + self.type_name + "_sz"]
+
+    def __post_init__(self):
+        if self.type_name in structs:
+            self.c_classifier = "struct "
+        symbolic_widths[self.type_name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrBuiltInType(_XdrTypeSpecifier):
     """Corresponds to a built-in XDR type"""
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return symbolic_widths[self.type_name]
 
 
 @dataclass
@@ -77,6 +131,18 @@ class _XdrFixedLengthOpaque(_XdrDeclaration):
     size: str
     template: str = "fixed_length_opaque"
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return xdr_quadlen(self.size)
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return ["XDR_QUADLEN(" + self.size + ")"]
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrVariableLengthOpaque(_XdrDeclaration):
@@ -86,14 +152,44 @@ class _XdrVariableLengthOpaque(_XdrDeclaration):
     maxsize: str
     template: str = "variable_length_opaque"
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 1 + xdr_quadlen(self.maxsize)
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        widths = ["XDR_unsigned_int"]
+        if self.maxsize != "0":
+            widths.append("XDR_QUADLEN(" + self.maxsize + ")")
+        return widths
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
-class _XdrVariableLengthString(_XdrDeclaration):
+class _XdrString(_XdrDeclaration):
     """A (NUL-terminated) variable-length string declaration"""
 
     name: str
     maxsize: str
-    template: str = "variable_length_string"
+    template: str = "string"
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 1 + xdr_quadlen(self.maxsize)
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        widths = ["XDR_unsigned_int"]
+        if self.maxsize != "0":
+            widths.append("XDR_QUADLEN(" + self.maxsize + ")")
+        return widths
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
 
 
 @dataclass
@@ -105,6 +201,19 @@ class _XdrFixedLengthArray(_XdrDeclaration):
     size: str
     template: str = "fixed_length_array"
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return xdr_quadlen(self.size) * max_widths[self.spec.type_name]
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        item_width = " + ".join(symbolic_widths[self.spec.type_name])
+        return ["(" + self.size + " * (" + item_width + "))"]
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrVariableLengthArray(_XdrDeclaration):
@@ -115,6 +224,22 @@ class _XdrVariableLengthArray(_XdrDeclaration):
     maxsize: str
     template: str = "variable_length_array"
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 1 + (xdr_quadlen(self.maxsize) * max_widths[self.spec.type_name])
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        widths = ["XDR_unsigned_int"]
+        if self.maxsize != "0":
+            item_width = " + ".join(symbolic_widths[self.spec.type_name])
+            widths.append("(" + self.maxsize + " * (" + item_width + "))")
+        return widths
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrOptionalData(_XdrDeclaration):
@@ -123,6 +248,20 @@ class _XdrOptionalData(_XdrDeclaration):
     name: str
     spec: _XdrTypeSpecifier
     template: str = "optional_data"
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 1
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return ["XDR_bool"]
+
+    def __post_init__(self):
+        structs.add(self.name)
+        pass_by_reference.add(self.name)
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
 
 
 @dataclass
@@ -133,12 +272,33 @@ class _XdrBasic(_XdrDeclaration):
     spec: _XdrTypeSpecifier
     template: str = "basic"
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return max_widths[self.spec.type_name]
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return symbolic_widths[self.spec.type_name]
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrVoid(_XdrDeclaration):
     """A void declaration"""
 
+    name: str = "void"
     template: str = "void"
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 0
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return []
 
 
 @dataclass
@@ -148,6 +308,10 @@ class _XdrConstant(_XdrAst):
     name: str
     value: str
 
+    def __post_init__(self):
+        if self.value not in constants:
+            constants[self.name] = int(self.value, 0)
+
 
 @dataclass
 class _XdrEnumerator(_XdrAst):
@@ -156,15 +320,29 @@ class _XdrEnumerator(_XdrAst):
     name: str
     value: str
 
+    def __post_init__(self):
+        if self.value not in constants:
+            constants[self.name] = int(self.value, 0)
+
 
 @dataclass
 class _XdrEnum(_XdrAst):
     """An XDR enum definition"""
 
     name: str
-    minimum: int
-    maximum: int
     enumerators: List[_XdrEnumerator]
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return 1
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return ["XDR_int"]
+
+    def __post_init__(self):
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
 
 
 @dataclass
@@ -174,6 +352,26 @@ class _XdrStruct(_XdrAst):
     name: str
     fields: List[_XdrDeclaration]
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        width = 0
+        for field in self.fields:
+            width += field.max_width()
+        return width
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        widths = []
+        for field in self.fields:
+            widths += field.symbolic_width()
+        return widths
+
+    def __post_init__(self):
+        structs.add(self.name)
+        pass_by_reference.add(self.name)
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrPointer(_XdrAst):
@@ -182,12 +380,50 @@ class _XdrPointer(_XdrAst):
     name: str
     fields: List[_XdrDeclaration]
 
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        width = 1
+        for field in self.fields[0:-1]:
+            width += field.max_width()
+        return width
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        widths = []
+        widths += ["XDR_bool"]
+        for field in self.fields[0:-1]:
+            widths += field.symbolic_width()
+        return widths
+
+    def __post_init__(self):
+        structs.add(self.name)
+        pass_by_reference.add(self.name)
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
+
 
 @dataclass
 class _XdrTypedef(_XdrAst):
     """An XDR typedef"""
 
     declaration: _XdrDeclaration
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        return self.declaration.max_width()
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        return self.declaration.symbolic_width()
+
+    def __post_init__(self):
+        if isinstance(self.declaration, _XdrBasic):
+            new_type = self.declaration
+            if isinstance(new_type.spec, _XdrDefinedType):
+                if new_type.spec.type_name in pass_by_reference:
+                    pass_by_reference.add(new_type.name)
+                max_widths[new_type.name] = self.max_width()
+                symbolic_widths[new_type.name] = self.symbolic_width()
 
 
 @dataclass
@@ -215,6 +451,36 @@ class _XdrUnion(_XdrAst):
     discriminant: _XdrDeclaration
     cases: List[_XdrCaseSpec]
     default: _XdrDeclaration
+
+    def max_width(self) -> int:
+        """Return width of type in XDR_UNITS"""
+        max_width = 0
+        for case in self.cases:
+            if case.arm.max_width() > max_width:
+                max_width = case.arm.max_width()
+        if self.default:
+            if self.default.arm.max_width() > max_width:
+                max_width = self.default.arm.max_width()
+        return 1 + max_width
+
+    def symbolic_width(self) -> List:
+        """Return list containing XDR width of type's components"""
+        max_width = 0
+        for case in self.cases:
+            if case.arm.max_width() > max_width:
+                max_width = case.arm.max_width()
+                width = case.arm.symbolic_width()
+        if self.default:
+            if self.default.arm.max_width() > max_width:
+                max_width = self.default.arm.max_width()
+                width = self.default.arm.symbolic_width()
+        return symbolic_widths[self.discriminant.name] + width
+
+    def __post_init__(self):
+        structs.add(self.name)
+        pass_by_reference.add(self.name)
+        max_widths[self.name] = self.max_width()
+        symbolic_widths[self.name] = self.symbolic_width()
 
 
 @dataclass
@@ -248,6 +514,13 @@ class _RpcProgram(_XdrAst):
 @dataclass
 class _Pragma(_XdrAst):
     """Empty class for pragma directives"""
+
+
+@dataclass
+class _XdrPassthru(_XdrAst):
+    """Passthrough line to emit verbatim in output"""
+
+    content: str
 
 
 @dataclass
@@ -290,24 +563,13 @@ class ParseToAst(Transformer):
         return _XdrConstantValue(value)
 
     def type_specifier(self, children):
-        """Instantiate one type_specifier object"""
-        c_classifier = ""
+        """Instantiate one _XdrTypeSpecifier object"""
         if isinstance(children[0], _XdrIdentifier):
             name = children[0].symbol
-            if name in enums:
-                c_classifier = "enum "
-            if name in structs:
-                c_classifier = "struct "
-            return _XdrDefinedType(
-                type_name=name,
-                c_classifier=c_classifier,
-            )
+            return _XdrDefinedType(type_name=name)
 
-        token = children[0].data
-        return _XdrBuiltInType(
-            type_name=token.value,
-            c_classifier=c_classifier,
-        )
+        name = children[0].data.value
+        return _XdrBuiltInType(type_name=name)
 
     def constant_def(self, children):
         """Instantiate one _XdrConstant object"""
@@ -315,12 +577,9 @@ class ParseToAst(Transformer):
         value = children[1].value
         return _XdrConstant(name, value)
 
-    # cel: Python can compute a min() and max() for the enumerator values
-    #      so that the generated code can perform proper range checking.
     def enum(self, children):
         """Instantiate one _XdrEnum object"""
         enum_name = children[0].symbol
-        enums.add(enum_name)
 
         i = 0
         enumerators = []
@@ -331,7 +590,7 @@ class ParseToAst(Transformer):
             enumerators.append(_XdrEnumerator(name, value))
             i = i + 2
 
-        return _XdrEnum(enum_name, 0, 0, enumerators)
+        return _XdrEnum(enum_name, enumerators)
 
     def fixed_length_opaque(self, children):
         """Instantiate one _XdrFixedLengthOpaque declaration object"""
@@ -350,15 +609,15 @@ class ParseToAst(Transformer):
 
         return _XdrVariableLengthOpaque(name, maxsize)
 
-    def variable_length_string(self, children):
-        """Instantiate one _XdrVariableLengthString declaration object"""
+    def string(self, children):
+        """Instantiate one _XdrString declaration object"""
         name = children[0].symbol
         if children[1] is not None:
             maxsize = children[1].value
         else:
             maxsize = "0"
 
-        return _XdrVariableLengthString(name, maxsize)
+        return _XdrString(name, maxsize)
 
     def fixed_length_array(self, children):
         """Instantiate one _XdrFixedLengthArray declaration object"""
@@ -383,8 +642,6 @@ class ParseToAst(Transformer):
         """Instantiate one _XdrOptionalData declaration object"""
         spec = children[0]
         name = children[1].symbol
-        structs.add(name)
-        pass_by_reference.add(name)
 
         return _XdrOptionalData(name, spec)
 
@@ -403,8 +660,6 @@ class ParseToAst(Transformer):
     def struct(self, children):
         """Instantiate one _XdrStruct object"""
         name = children[0].symbol
-        structs.add(name)
-        pass_by_reference.add(name)
         fields = children[1].children
 
         last_field = fields[-1]
@@ -419,11 +674,6 @@ class ParseToAst(Transformer):
     def typedef(self, children):
         """Instantiate one _XdrTypedef object"""
         new_type = children[0]
-        if isinstance(new_type, _XdrBasic) and isinstance(
-            new_type.spec, _XdrDefinedType
-        ):
-            if new_type.spec.type_name in pass_by_reference:
-                pass_by_reference.add(new_type.name)
 
         return _XdrTypedef(new_type)
 
@@ -445,8 +695,6 @@ class ParseToAst(Transformer):
     def union(self, children):
         """Instantiate one _XdrUnion object"""
         name = children[0].symbol
-        structs.add(name)
-        pass_by_reference.add(name)
 
         body = children[1]
         discriminant = body.children[0].children[0]
@@ -484,6 +732,8 @@ class ParseToAst(Transformer):
         """Instantiate one _Pragma object"""
         directive = children[0].children[0].data
         match directive:
+            case "big_endian_directive":
+                big_endian.append(children[1].symbol)
             case "exclude_directive":
                 excluded_apis.append(children[1].symbol)
             case "header_directive":
@@ -495,14 +745,42 @@ class ParseToAst(Transformer):
                 raise NotImplementedError("Directive not supported")
         return _Pragma()
 
+    def passthru_def(self, children):
+        """Instantiate one _XdrPassthru object"""
+        token = children[0]
+        content = token.value[1:]
+        return _XdrPassthru(content)
+
 
 transformer = ast_utils.create_transformer(this_module, ParseToAst())
 
 
+def _merge_consecutive_passthru(definitions: List[Definition]) -> List[Definition]:
+    """Merge consecutive passthru definitions into single nodes"""
+    result = []
+    i = 0
+    while i < len(definitions):
+        if isinstance(definitions[i].value, _XdrPassthru):
+            lines = [definitions[i].value.content]
+            meta = definitions[i].meta
+            j = i + 1
+            while j < len(definitions) and isinstance(definitions[j].value, _XdrPassthru):
+                lines.append(definitions[j].value.content)
+                j += 1
+            merged = _XdrPassthru("\n".join(lines))
+            result.append(Definition(meta, merged))
+            i = j
+        else:
+            result.append(definitions[i])
+            i += 1
+    return result
+
+
 def transform_parse_tree(parse_tree):
     """Transform productions into an abstract syntax tree"""
-
-    return transformer.transform(parse_tree)
+    ast = transformer.transform(parse_tree)
+    ast.definitions = _merge_consecutive_passthru(ast.definitions)
+    return ast
 
 
 def get_header_name() -> str:

@@ -2,6 +2,9 @@
 
 //! Build-time assert.
 
+#[doc(hidden)]
+pub use build_error::build_error;
+
 /// Fails the build if the code path calling `build_error!` can possibly be executed.
 ///
 /// If the macro is executed in const context, `build_error!` will panic.
@@ -11,7 +14,6 @@
 /// # Examples
 ///
 /// ```
-/// # use kernel::build_error;
 /// #[inline]
 /// fn foo(a: usize) -> usize {
 ///     a.checked_add(1).unwrap_or_else(|| build_error!("overflow"))
@@ -23,10 +25,10 @@
 #[macro_export]
 macro_rules! build_error {
     () => {{
-        $crate::build_error("")
+        $crate::build_assert::build_error("")
     }};
     ($msg:expr) => {{
-        $crate::build_error($msg)
+        $crate::build_assert::build_error($msg)
     }};
 }
 
@@ -59,8 +61,13 @@ macro_rules! build_error {
 ///     build_assert!(N > 1); // Build-time check
 ///     assert!(N > 1); // Run-time check
 /// }
+/// ```
 ///
-/// #[inline]
+/// When a condition depends on a function argument, the function must be annotated with
+/// `#[inline(always)]`. Without this attribute, the compiler may choose to not inline the
+/// function, preventing it from optimizing out the error path.
+/// ```
+/// #[inline(always)]
 /// fn bar(n: usize) {
 ///     // `static_assert!(n > 1);` is not allowed
 ///     build_assert!(n > 1); // Build-time check
@@ -73,12 +80,12 @@ macro_rules! build_error {
 macro_rules! build_assert {
     ($cond:expr $(,)?) => {{
         if !$cond {
-            $crate::build_error(concat!("assertion failed: ", stringify!($cond)));
+            $crate::build_assert::build_error(concat!("assertion failed: ", stringify!($cond)));
         }
     }};
     ($cond:expr, $msg:expr) => {{
         if !$cond {
-            $crate::build_error($msg);
+            $crate::build_assert::build_error($msg);
         }
     }};
 }

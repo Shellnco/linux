@@ -689,7 +689,6 @@ static int ep93xx_spi_probe(struct platform_device *pdev)
 	/* make sure that the hardware is disabled */
 	writel(0, espi->mmio + SSPCR1);
 
-	device_set_node(&host->dev, dev_fwnode(&pdev->dev));
 	error = devm_spi_register_controller(&pdev->dev, host);
 	if (error) {
 		dev_err(&pdev->dev, "failed to register SPI host\n");
@@ -729,7 +728,7 @@ static struct platform_driver ep93xx_spi_driver = {
 		.of_match_table = ep93xx_spi_of_ids,
 	},
 	.probe		= ep93xx_spi_probe,
-	.remove_new	= ep93xx_spi_remove,
+	.remove		= ep93xx_spi_remove,
 };
 module_platform_driver(ep93xx_spi_driver);
 

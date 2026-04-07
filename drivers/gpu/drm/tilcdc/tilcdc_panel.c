@@ -272,7 +272,7 @@ static struct tilcdc_panel_info *of_get_panel_info(struct device_node *np)
 		return NULL;
 	}
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (!info)
 		goto put_node;
 
@@ -390,7 +390,7 @@ static const struct of_device_id panel_of_match[] = {
 
 static struct platform_driver panel_driver = {
 	.probe = panel_probe,
-	.remove_new = panel_remove,
+	.remove = panel_remove,
 	.driver = {
 		.name = "tilcdc-panel",
 		.of_match_table = panel_of_match,

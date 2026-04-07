@@ -282,7 +282,7 @@ static struct tegra_dma_desc *tegra_dma_desc_get(struct tegra_dma_channel *tdc)
 	spin_unlock_irqrestore(&tdc->lock, flags);
 
 	/* Allocate DMA desc */
-	dma_desc = kzalloc(sizeof(*dma_desc), GFP_NOWAIT);
+	dma_desc = kzalloc_obj(*dma_desc, GFP_NOWAIT);
 	if (!dma_desc)
 		return NULL;
 
@@ -321,7 +321,7 @@ tegra_dma_sg_req_get(struct tegra_dma_channel *tdc)
 	}
 	spin_unlock_irqrestore(&tdc->lock, flags);
 
-	sg_req = kzalloc(sizeof(*sg_req), GFP_NOWAIT);
+	sg_req = kzalloc_obj(*sg_req, GFP_NOWAIT);
 
 	return sg_req;
 }
@@ -1675,7 +1675,7 @@ static struct platform_driver tegra_dmac_driver = {
 		.of_match_table = tegra_dma_of_match,
 	},
 	.probe		= tegra_dma_probe,
-	.remove_new	= tegra_dma_remove,
+	.remove		= tegra_dma_remove,
 };
 
 module_platform_driver(tegra_dmac_driver);

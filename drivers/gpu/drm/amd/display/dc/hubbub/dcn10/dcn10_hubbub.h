@@ -198,6 +198,9 @@ struct dcn_hubbub_registers {
 	uint32_t DCHUBBUB_ARB_REFCYC_PER_META_TRIP_B;
 	uint32_t DCHUBBUB_ARB_FRAC_URG_BW_MALL_A;
 	uint32_t DCHUBBUB_ARB_FRAC_URG_BW_MALL_B;
+	uint32_t DCHUBBUB_TIMEOUT_DETECTION_CTRL1;
+	uint32_t DCHUBBUB_TIMEOUT_DETECTION_CTRL2;
+	uint32_t DCHUBBUB_CTRL_STATUS;
 };
 
 #define HUBBUB_REG_FIELD_LIST_DCN32(type) \
@@ -313,7 +316,17 @@ struct dcn_hubbub_registers {
 		type DCN_VM_ERROR_VMID;\
 		type DCN_VM_ERROR_TABLE_LEVEL;\
 		type DCN_VM_ERROR_PIPE;\
-		type DCN_VM_ERROR_INTERRUPT_STATUS
+		type DCN_VM_ERROR_INTERRUPT_STATUS;\
+		type DCHUBBUB_TIMEOUT_ERROR_STATUS;\
+		type DCHUBBUB_TIMEOUT_REQ_STALL_THRESHOLD;\
+		type DCHUBBUB_TIMEOUT_PSTATE_STALL_THRESHOLD;\
+		type DCHUBBUB_TIMEOUT_DETECTION_EN;\
+		type DCHUBBUB_TIMEOUT_TIMER_RESET;\
+		type ROB_UNDERFLOW_STATUS;\
+		type ROB_OVERFLOW_STATUS;\
+		type ROB_OVERFLOW_CLEAR;\
+		type DCHUBBUB_HW_DEBUG;\
+		type CSTATE_SWATH_CHK_GOOD_MODE
 
 #define HUBBUB_STUTTER_REG_FIELD_LIST(type) \
 		type DCHUBBUB_ARB_ALLOW_SR_ENTER_WATERMARK_A;\
@@ -424,7 +437,9 @@ struct dcn_hubbub_registers {
 		type DCHUBBUB_ARB_REFCYC_PER_META_TRIP_A;\
 		type DCHUBBUB_ARB_REFCYC_PER_META_TRIP_B;\
 		type DCHUBBUB_ARB_FRAC_URG_BW_MALL_A;\
-		type DCHUBBUB_ARB_FRAC_URG_BW_MALL_B
+		type DCHUBBUB_ARB_FRAC_URG_BW_MALL_B;\
+		type DCHUBBUB_ARB_ALLOW_DCFCLK_DEEP_SLEEP_FORCE_VALUE;\
+		type DCHUBBUB_ARB_ALLOW_DCFCLK_DEEP_SLEEP_FORCE_ENABLE
 
 struct dcn_hubbub_shift {
 	DCN_HUBBUB_REG_FIELD_LIST(uint8_t);
@@ -434,6 +449,7 @@ struct dcn_hubbub_shift {
 	HUBBUB_REG_FIELD_LIST_DCN32(uint8_t);
 	HUBBUB_REG_FIELD_LIST_DCN35(uint8_t);
 	HUBBUB_REG_FIELD_LIST_DCN4_01(uint8_t);
+
 };
 
 struct dcn_hubbub_mask {
@@ -444,6 +460,7 @@ struct dcn_hubbub_mask {
 	HUBBUB_REG_FIELD_LIST_DCN32(uint32_t);
 	HUBBUB_REG_FIELD_LIST_DCN35(uint32_t);
 	HUBBUB_REG_FIELD_LIST_DCN4_01(uint32_t);
+
 };
 
 struct dc;
@@ -476,9 +493,6 @@ void hubbub1_allow_self_refresh_control(struct hubbub *hubbub, bool allow);
 
 bool hubbub1_is_allow_self_refresh_enabled(struct hubbub *hubub);
 
-void hubbub1_toggle_watermark_change_req(
-		struct hubbub *hubbub);
-
 void hubbub1_wm_read_state(struct hubbub *hubbub,
 		struct dcn_hubbub_wm *wm);
 
@@ -504,5 +518,9 @@ bool hubbub1_program_pstate_watermarks(
 		union dcn_watermark_set *watermarks,
 		unsigned int refclk_mhz,
 		bool safe_to_lower);
+
+void dcn10_hubbub_global_timer_enable(struct hubbub *hubbub, bool enable, uint32_t refdiv);
+
+void dcn10_hubbub_read_fb_aperture(struct hubbub *hubbub, uint32_t *fb_base_value, uint32_t *fb_offset_value);
 
 #endif

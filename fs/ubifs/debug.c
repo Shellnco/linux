@@ -863,7 +863,6 @@ void ubifs_dump_leb(const struct ubifs_info *c, int lnum)
 
 out:
 	vfree(buf);
-	return;
 }
 
 void ubifs_dump_znode(const struct ubifs_info *c,
@@ -946,16 +945,20 @@ void ubifs_dump_tnc(struct ubifs_info *c)
 
 	pr_err("\n");
 	pr_err("(pid %d) start dumping TNC tree\n", current->pid);
-	znode = ubifs_tnc_levelorder_next(c, c->zroot.znode, NULL);
-	level = znode->level;
-	pr_err("== Level %d ==\n", level);
-	while (znode) {
-		if (level != znode->level) {
-			level = znode->level;
-			pr_err("== Level %d ==\n", level);
+	if (c->zroot.znode) {
+		znode = ubifs_tnc_levelorder_next(c, c->zroot.znode, NULL);
+		level = znode->level;
+		pr_err("== Level %d ==\n", level);
+		while (znode) {
+			if (level != znode->level) {
+				level = znode->level;
+				pr_err("== Level %d ==\n", level);
+			}
+			ubifs_dump_znode(c, znode);
+			znode = ubifs_tnc_levelorder_next(c, c->zroot.znode, znode);
 		}
-		ubifs_dump_znode(c, znode);
-		znode = ubifs_tnc_levelorder_next(c, c->zroot.znode, znode);
+	} else {
+		pr_err("empty TNC tree in memory\n");
 	}
 	pr_err("(pid %d) finish dumping TNC tree\n", current->pid);
 }
@@ -1843,7 +1846,7 @@ static struct fsck_inode *add_inode(struct ubifs_info *c,
 		return ERR_PTR(-EINVAL);
 	}
 
-	fscki = kzalloc(sizeof(struct fsck_inode), GFP_NOFS);
+	fscki = kzalloc_obj(struct fsck_inode, GFP_NOFS);
 	if (!fscki)
 		return ERR_PTR(-ENOMEM);
 
@@ -3032,7 +3035,7 @@ void ubifs_assert_failed(struct ubifs_info *c, const char *expr,
  */
 int ubifs_debugging_init(struct ubifs_info *c)
 {
-	c->dbg = kzalloc(sizeof(struct ubifs_debug_info), GFP_KERNEL);
+	c->dbg = kzalloc_obj(struct ubifs_debug_info);
 	if (!c->dbg)
 		return -ENOMEM;
 

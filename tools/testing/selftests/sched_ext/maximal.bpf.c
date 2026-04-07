@@ -12,6 +12,8 @@
 
 char _license[] SEC("license") = "GPL";
 
+#define DSQ_ID 0
+
 s32 BPF_STRUCT_OPS(maximal_select_cpu, struct task_struct *p, s32 prev_cpu,
 		   u64 wake_flags)
 {
@@ -20,7 +22,7 @@ s32 BPF_STRUCT_OPS(maximal_select_cpu, struct task_struct *p, s32 prev_cpu,
 
 void BPF_STRUCT_OPS(maximal_enqueue, struct task_struct *p, u64 enq_flags)
 {
-	scx_bpf_dispatch(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
+	scx_bpf_dsq_insert(p, DSQ_ID, SCX_SLICE_DFL, enq_flags);
 }
 
 void BPF_STRUCT_OPS(maximal_dequeue, struct task_struct *p, u64 deq_flags)
@@ -28,7 +30,7 @@ void BPF_STRUCT_OPS(maximal_dequeue, struct task_struct *p, u64 deq_flags)
 
 void BPF_STRUCT_OPS(maximal_dispatch, s32 cpu, struct task_struct *prev)
 {
-	scx_bpf_consume(SCX_DSQ_GLOBAL);
+	scx_bpf_dsq_move_to_local(DSQ_ID);
 }
 
 void BPF_STRUCT_OPS(maximal_runnable, struct task_struct *p, u64 enq_flags)
@@ -121,9 +123,13 @@ void BPF_STRUCT_OPS(maximal_cgroup_cancel_move, struct task_struct *p,
 void BPF_STRUCT_OPS(maximal_cgroup_set_weight, struct cgroup *cgrp, u32 weight)
 {}
 
+void BPF_STRUCT_OPS(maximal_cgroup_set_bandwidth, struct cgroup *cgrp,
+		    u64 period_us, u64 quota_us, u64 burst_us)
+{}
+
 s32 BPF_STRUCT_OPS_SLEEPABLE(maximal_init)
 {
-	return 0;
+	return scx_bpf_create_dsq(DSQ_ID, -1);
 }
 
 void BPF_STRUCT_OPS(maximal_exit, struct scx_exit_info *info)
@@ -131,34 +137,35 @@ void BPF_STRUCT_OPS(maximal_exit, struct scx_exit_info *info)
 
 SEC(".struct_ops.link")
 struct sched_ext_ops maximal_ops = {
-	.select_cpu		= maximal_select_cpu,
-	.enqueue		= maximal_enqueue,
-	.dequeue		= maximal_dequeue,
-	.dispatch		= maximal_dispatch,
-	.runnable		= maximal_runnable,
-	.running		= maximal_running,
-	.stopping		= maximal_stopping,
-	.quiescent		= maximal_quiescent,
-	.yield			= maximal_yield,
-	.core_sched_before	= maximal_core_sched_before,
-	.set_weight		= maximal_set_weight,
-	.set_cpumask		= maximal_set_cpumask,
-	.update_idle		= maximal_update_idle,
-	.cpu_acquire		= maximal_cpu_acquire,
-	.cpu_release		= maximal_cpu_release,
-	.cpu_online		= maximal_cpu_online,
-	.cpu_offline		= maximal_cpu_offline,
-	.init_task		= maximal_init_task,
-	.enable			= maximal_enable,
-	.exit_task		= maximal_exit_task,
-	.disable		= maximal_disable,
-	.cgroup_init		= maximal_cgroup_init,
-	.cgroup_exit		= maximal_cgroup_exit,
-	.cgroup_prep_move	= maximal_cgroup_prep_move,
-	.cgroup_move		= maximal_cgroup_move,
-	.cgroup_cancel_move	= maximal_cgroup_cancel_move,
-	.cgroup_set_weight	= maximal_cgroup_set_weight,
-	.init			= maximal_init,
-	.exit			= maximal_exit,
+	.select_cpu		= (void *) maximal_select_cpu,
+	.enqueue		= (void *) maximal_enqueue,
+	.dequeue		= (void *) maximal_dequeue,
+	.dispatch		= (void *) maximal_dispatch,
+	.runnable		= (void *) maximal_runnable,
+	.running		= (void *) maximal_running,
+	.stopping		= (void *) maximal_stopping,
+	.quiescent		= (void *) maximal_quiescent,
+	.yield			= (void *) maximal_yield,
+	.core_sched_before	= (void *) maximal_core_sched_before,
+	.set_weight		= (void *) maximal_set_weight,
+	.set_cpumask		= (void *) maximal_set_cpumask,
+	.update_idle		= (void *) maximal_update_idle,
+	.cpu_acquire		= (void *) maximal_cpu_acquire,
+	.cpu_release		= (void *) maximal_cpu_release,
+	.cpu_online		= (void *) maximal_cpu_online,
+	.cpu_offline		= (void *) maximal_cpu_offline,
+	.init_task		= (void *) maximal_init_task,
+	.enable			= (void *) maximal_enable,
+	.exit_task		= (void *) maximal_exit_task,
+	.disable		= (void *) maximal_disable,
+	.cgroup_init		= (void *) maximal_cgroup_init,
+	.cgroup_exit		= (void *) maximal_cgroup_exit,
+	.cgroup_prep_move	= (void *) maximal_cgroup_prep_move,
+	.cgroup_move		= (void *) maximal_cgroup_move,
+	.cgroup_cancel_move	= (void *) maximal_cgroup_cancel_move,
+	.cgroup_set_weight	= (void *) maximal_cgroup_set_weight,
+	.cgroup_set_bandwidth	= (void *) maximal_cgroup_set_bandwidth,
+	.init			= (void *) maximal_init,
+	.exit			= (void *) maximal_exit,
 	.name			= "maximal",
 };

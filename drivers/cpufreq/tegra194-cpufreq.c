@@ -463,7 +463,7 @@ static int tegra_cpufreq_init_cpufreq_table(struct cpufreq_policy *policy,
 		return ret;
 	}
 
-	freq_table = kcalloc((max_opps + 1), sizeof(*freq_table), GFP_KERNEL);
+	freq_table = kzalloc_objs(*freq_table, (max_opps + 1));
 	if (!freq_table)
 		return -ENOMEM;
 
@@ -589,7 +589,6 @@ static struct cpufreq_driver tegra194_cpufreq_driver = {
 	.exit = tegra194_cpufreq_exit,
 	.online = tegra194_cpufreq_online,
 	.offline = tegra194_cpufreq_offline,
-	.attr = cpufreq_generic_attr,
 };
 
 static struct tegra_cpufreq_ops tegra194_cpufreq_ops = {
@@ -751,7 +750,8 @@ static int tegra194_cpufreq_probe(struct platform_device *pdev)
 	if (IS_ERR(bpmp))
 		return PTR_ERR(bpmp);
 
-	read_counters_wq = alloc_workqueue("read_counters_wq", __WQ_LEGACY, 1);
+	read_counters_wq = alloc_workqueue("read_counters_wq",
+					   __WQ_LEGACY | WQ_PERCPU, 1);
 	if (!read_counters_wq) {
 		dev_err(&pdev->dev, "fail to create_workqueue\n");
 		err = -EINVAL;
@@ -818,7 +818,7 @@ static struct platform_driver tegra194_ccplex_driver = {
 		.of_match_table = tegra194_cpufreq_of_match,
 	},
 	.probe = tegra194_cpufreq_probe,
-	.remove_new = tegra194_cpufreq_remove,
+	.remove = tegra194_cpufreq_remove,
 };
 module_platform_driver(tegra194_ccplex_driver);
 

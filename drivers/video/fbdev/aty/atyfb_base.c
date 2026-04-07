@@ -2272,7 +2272,7 @@ static void aty_bl_init(struct atyfb_par *par)
 			    0xFF * FB_BACKLIGHT_MAX / MAX_LEVEL);
 
 	bd->props.brightness = bd->props.max_brightness;
-	bd->props.power = FB_BLANK_UNBLANK;
+	bd->props.power = BACKLIGHT_POWER_ON;
 	backlight_update_status(bd);
 
 	printk("aty: Backlight initialized (%s)\n", name);
@@ -2614,8 +2614,12 @@ static int aty_init(struct fb_info *info)
 		pr_cont("\n");
 	}
 #endif
-	if (par->pll_ops->init_pll)
-		par->pll_ops->init_pll(info, &par->pll);
+	if (par->pll_ops->init_pll) {
+		ret = par->pll_ops->init_pll(info, &par->pll);
+		if (ret)
+			return ret;
+	}
+
 	if (par->pll_ops->resume_pll)
 		par->pll_ops->resume_pll(info, &par->pll);
 
@@ -2972,7 +2976,7 @@ static int atyfb_setup_sparc(struct pci_dev *pdev, struct fb_info *info,
 		/* nothing */ ;
 	j = i + 4;
 
-	par->mmap_map = kcalloc(j, sizeof(*par->mmap_map), GFP_ATOMIC);
+	par->mmap_map = kzalloc_objs(*par->mmap_map, j, GFP_ATOMIC);
 	if (!par->mmap_map) {
 		PRINTKE("atyfb_setup_sparc() can't alloc mmap_map\n");
 		return -ENOMEM;

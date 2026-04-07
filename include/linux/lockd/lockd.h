@@ -12,6 +12,7 @@
 
 /* XXX: a lot of this should really be under fs/lockd. */
 
+#include <linux/exportfs.h>
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <net/ipv6.h>
@@ -278,9 +279,9 @@ __be32		  nlmsvc_lock(struct svc_rqst *, struct nlm_file *,
 			      struct nlm_host *, struct nlm_lock *, int,
 			      struct nlm_cookie *, int);
 __be32		  nlmsvc_unlock(struct net *net, struct nlm_file *, struct nlm_lock *);
-__be32		  nlmsvc_testlock(struct svc_rqst *, struct nlm_file *,
-			struct nlm_host *, struct nlm_lock *,
-			struct nlm_lock *, struct nlm_cookie *);
+__be32		  nlmsvc_testlock(struct svc_rqst *rqstp, struct nlm_file *file,
+			struct nlm_host *host, struct nlm_lock *lock,
+			struct nlm_lock *conflock);
 __be32		  nlmsvc_cancel_blocked(struct net *net, struct nlm_file *, struct nlm_lock *);
 void		  nlmsvc_retry_blocked(struct svc_rqst *rqstp);
 void		  nlmsvc_traverse_blocks(struct nlm_host *, struct nlm_file *,
@@ -307,7 +308,7 @@ void		  nlmsvc_invalidate_all(void);
 int           nlmsvc_unlock_all_by_sb(struct super_block *sb);
 int           nlmsvc_unlock_all_by_ip(struct sockaddr *server_addr);
 
-static inline struct file *nlmsvc_file_file(struct nlm_file *file)
+static inline struct file *nlmsvc_file_file(const struct nlm_file *file)
 {
 	return file->f_file[O_RDONLY] ?
 	       file->f_file[O_RDONLY] : file->f_file[O_WRONLY];
@@ -316,6 +317,12 @@ static inline struct file *nlmsvc_file_file(struct nlm_file *file)
 static inline struct inode *nlmsvc_file_inode(struct nlm_file *file)
 {
 	return file_inode(nlmsvc_file_file(file));
+}
+
+static inline bool
+nlmsvc_file_cannot_lock(const struct nlm_file *file)
+{
+	return exportfs_cannot_lock(nlmsvc_file_file(file)->f_path.dentry->d_sb->s_export_op);
 }
 
 static inline int __nlm_privileged_request4(const struct sockaddr *sap)

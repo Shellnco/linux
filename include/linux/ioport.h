@@ -10,6 +10,7 @@
 #define _LINUX_IOPORT_H
 
 #ifndef __ASSEMBLY__
+#include <linux/args.h>
 #include <linux/bits.h>
 #include <linux/compiler.h>
 #include <linux/minmax.h>
@@ -154,14 +155,23 @@ enum {
 };
 
 /* helpers to define resources */
-#define DEFINE_RES_NAMED(_start, _size, _name, _flags)			\
+#define DEFINE_RES_NAMED_DESC(_start, _size, _name, _flags, _desc)	\
 (struct resource) {							\
 		.start = (_start),					\
 		.end = (_start) + (_size) - 1,				\
 		.name = (_name),					\
 		.flags = (_flags),					\
-		.desc = IORES_DESC_NONE,				\
+		.desc = (_desc),					\
 	}
+
+#define DEFINE_RES_NAMED(_start, _size, _name, _flags)			\
+	DEFINE_RES_NAMED_DESC(_start, _size, _name, _flags, IORES_DESC_NONE)
+#define __DEFINE_RES0()							\
+	DEFINE_RES_NAMED(0, 0, NULL, IORESOURCE_UNSET)
+#define __DEFINE_RES3(_start, _size, _flags)				\
+	DEFINE_RES_NAMED(_start, _size, NULL, _flags)
+#define DEFINE_RES(...)							\
+	CONCATENATE(__DEFINE_RES, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)
 
 #define DEFINE_RES_IO_NAMED(_start, _size, _name)			\
 	DEFINE_RES_NAMED((_start), (_size), (_name), IORESOURCE_IO)
@@ -227,6 +237,7 @@ struct resource_constraint {
 /* PC/ISA/whatever - the normal PC address spaces: IO and memory */
 extern struct resource ioport_resource;
 extern struct resource iomem_resource;
+extern struct resource soft_reserve_resource;
 
 extern struct resource *request_resource_conflict(struct resource *root, struct resource *new);
 extern int request_resource(struct resource *root, struct resource *new);
@@ -249,6 +260,38 @@ struct resource *lookup_resource(struct resource *root, resource_size_t start);
 int adjust_resource(struct resource *res, resource_size_t start,
 		    resource_size_t size);
 resource_size_t resource_alignment(struct resource *res);
+
+/**
+ * resource_set_size - Calculate resource end address from size and start
+ * @res: Resource descriptor
+ * @size: Size of the resource
+ *
+ * Calculate the end address for @res based on @size.
+ *
+ * Note: The start address of @res must be set when calling this function.
+ * Prefer resource_set_range() if setting both the start address and @size.
+ */
+static inline void resource_set_size(struct resource *res, resource_size_t size)
+{
+	res->end = res->start + size - 1;
+}
+
+/**
+ * resource_set_range - Set resource start and end addresses
+ * @res: Resource descriptor
+ * @start: Start address for the resource
+ * @size: Size of the resource
+ *
+ * Set @res start address and calculate the end address based on @size.
+ */
+static inline void resource_set_range(struct resource *res,
+				      resource_size_t start,
+				      resource_size_t size)
+{
+	res->start = start;
+	resource_set_size(res, size);
+}
+
 static inline resource_size_t resource_size(const struct resource *res)
 {
 	return res->end - res->start + 1;
@@ -295,6 +338,15 @@ static inline bool resource_union(const struct resource *r1, const struct resour
 	r->start = min(r1->start, r2->start);
 	r->end = max(r1->end, r2->end);
 	return true;
+}
+
+/*
+ * Check if this resource is added to a resource tree or detached. Caller is
+ * responsible for not racing assignment.
+ */
+static inline bool resource_assigned(const struct resource *res)
+{
+	return res->parent;
 }
 
 int find_resource_space(struct resource *root, struct resource *new,
@@ -372,6 +424,10 @@ walk_system_ram_res_rev(u64 start, u64 end, void *arg,
 extern int
 walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,
 		    void *arg, int (*func)(struct resource *, void *));
+extern int walk_soft_reserve_res(u64 start, u64 end, void *arg,
+				 int (*func)(struct resource *, void *));
+extern int
+region_intersects_soft_reserve(resource_size_t start, size_t size);
 
 struct resource *devm_request_free_mem_region(struct device *dev,
 		struct resource *base, unsigned long size);

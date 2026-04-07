@@ -196,7 +196,7 @@ void rt2x00usb_register_read_async(struct rt2x00_dev *rt2x00dev,
 	struct urb *urb;
 	struct rt2x00_async_read_data *rd;
 
-	rd = kmalloc(sizeof(*rd), GFP_ATOMIC);
+	rd = kmalloc_obj(*rd, GFP_ATOMIC);
 	if (!rd)
 		return;
 
@@ -823,8 +823,6 @@ int rt2x00usb_probe(struct usb_interface *usb_intf,
 
 	INIT_WORK(&rt2x00dev->rxdone_work, rt2x00usb_work_rxdone);
 	INIT_WORK(&rt2x00dev->txdone_work, rt2x00usb_work_txdone);
-	hrtimer_init(&rt2x00dev->txstatus_timer, CLOCK_MONOTONIC,
-		     HRTIMER_MODE_REL);
 
 	retval = rt2x00usb_alloc_reg(rt2x00dev);
 	if (retval)

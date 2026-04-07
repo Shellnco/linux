@@ -119,11 +119,10 @@ static int knav_queue_setup_irq(struct knav_range_info *range,
 
 	if (range->flags & RANGE_HAS_IRQ) {
 		irq = range->irqs[queue].irq;
-		ret = request_irq(irq, knav_queue_int_handler, 0,
-					inst->irq_name, inst);
+		ret = request_irq(irq, knav_queue_int_handler, IRQF_NO_AUTOEN,
+				  inst->irq_name, inst);
 		if (ret)
 			return ret;
-		disable_irq(irq);
 		if (range->irqs[queue].cpu_mask) {
 			ret = irq_set_affinity_hint(irq, range->irqs[queue].cpu_mask);
 			if (ret) {
@@ -253,8 +252,7 @@ static struct knav_queue *__knav_queue_open(struct knav_queue_inst *inst,
 	return qh;
 
 err:
-	if (qh->stats)
-		free_percpu(qh->stats);
+	free_percpu(qh->stats);
 	devm_kfree(inst->kdev->dev, qh);
 	return ERR_PTR(ret);
 }
@@ -723,7 +721,6 @@ static void kdesc_empty_pool(struct knav_pool *pool)
 		if (!desc) {
 			dev_dbg(pool->kdev->dev,
 				"couldn't unmap desc, continuing\n");
-			continue;
 		}
 	}
 	WARN_ON(i != pool->num_desc);
@@ -1082,7 +1079,6 @@ static int knav_queue_setup_regions(struct knav_device *kdev,
 	struct device_node *regions __free(device_node) =
 			of_get_child_by_name(node, "descriptor-regions");
 	struct knav_region *region;
-	struct device_node *child;
 	u32 temp[2];
 	int ret;
 
@@ -1090,13 +1086,10 @@ static int knav_queue_setup_regions(struct knav_device *kdev,
 		return dev_err_probe(dev, -ENODEV,
 				     "descriptor-regions not specified\n");
 
-	for_each_child_of_node(regions, child) {
+	for_each_child_of_node_scoped(regions, child) {
 		region = devm_kzalloc(dev, sizeof(*region), GFP_KERNEL);
-		if (!region) {
-			of_node_put(child);
-			dev_err(dev, "out of memory allocating region\n");
+		if (!region)
 			return -ENOMEM;
-		}
 
 		region->name = knav_queue_find_name(child);
 		of_property_read_u32(child, "id", &region->id);
@@ -1400,7 +1393,6 @@ static int knav_queue_init_qmgrs(struct knav_device *kdev,
 	struct device_node *qmgrs __free(device_node) =
 			of_get_child_by_name(node, "qmgrs");
 	struct knav_qmgr_info *qmgr;
-	struct device_node *child;
 	u32 temp[2];
 	int ret;
 
@@ -1408,13 +1400,10 @@ static int knav_queue_init_qmgrs(struct knav_device *kdev,
 		return dev_err_probe(dev, -ENODEV,
 				     "queue manager info not specified\n");
 
-	for_each_child_of_node(qmgrs, child) {
+	for_each_child_of_node_scoped(qmgrs, child) {
 		qmgr = devm_kzalloc(dev, sizeof(*qmgr), GFP_KERNEL);
-		if (!qmgr) {
-			of_node_put(child);
-			dev_err(dev, "out of memory allocating qmgr\n");
+		if (!qmgr)
 			return -ENOMEM;
-		}
 
 		ret = of_property_read_u32_array(child, "managed-queues",
 						 temp, 2);
@@ -1506,15 +1495,12 @@ static int knav_queue_init_pdsps(struct knav_device *kdev,
 {
 	struct device *dev = kdev->dev;
 	struct knav_pdsp_info *pdsp;
-	struct device_node *child;
 
-	for_each_child_of_node(pdsps, child) {
+	for_each_child_of_node_scoped(pdsps, child) {
 		pdsp = devm_kzalloc(dev, sizeof(*pdsp), GFP_KERNEL);
-		if (!pdsp) {
-			of_node_put(child);
-			dev_err(dev, "out of memory allocating pdsp\n");
+		if (!pdsp)
 			return -ENOMEM;
-		}
+
 		pdsp->name = knav_queue_find_name(child);
 		pdsp->iram =
 			knav_queue_map_reg(kdev, child,
@@ -1894,7 +1880,7 @@ static void knav_queue_remove(struct platform_device *pdev)
 
 static struct platform_driver keystone_qmss_driver = {
 	.probe		= knav_queue_probe,
-	.remove_new	= knav_queue_remove,
+	.remove		= knav_queue_remove,
 	.driver		= {
 		.name	= "keystone-navigator-qmss",
 		.of_match_table = keystone_qmss_of_match,

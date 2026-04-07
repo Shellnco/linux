@@ -173,9 +173,6 @@ enum {
 	MSM8974_SNOC_SLV_QDSS_STM,
 };
 
-#define RPM_BUS_MASTER_REQ	0x73616d62
-#define RPM_BUS_SLAVE_REQ	0x766c7362
-
 #define to_msm8974_icc_provider(_provider) \
 	container_of(_provider, struct msm8974_icc_provider, provider)
 
@@ -762,7 +759,7 @@ MODULE_DEVICE_TABLE(of, msm8974_noc_of_match);
 
 static struct platform_driver msm8974_noc_driver = {
 	.probe = msm8974_icc_probe,
-	.remove_new = msm8974_icc_remove,
+	.remove = msm8974_icc_remove,
 	.driver = {
 		.name = "qnoc-msm8974",
 		.of_match_table = msm8974_noc_of_match,

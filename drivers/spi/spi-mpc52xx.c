@@ -430,7 +430,6 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 	host->transfer = mpc52xx_spi_transfer;
 	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
 	host->bits_per_word_mask = SPI_BPW_MASK(8);
-	host->dev.of_node = op->dev.of_node;
 
 	platform_set_drvdata(op, host);
 
@@ -444,9 +443,7 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 	ms->gpio_cs_count = gpiod_count(&op->dev, NULL);
 	if (ms->gpio_cs_count > 0) {
 		host->num_chipselect = ms->gpio_cs_count;
-		ms->gpio_cs = kmalloc_array(ms->gpio_cs_count,
-					    sizeof(*ms->gpio_cs),
-					    GFP_KERNEL);
+		ms->gpio_cs = kmalloc_objs(*ms->gpio_cs, ms->gpio_cs_count);
 		if (!ms->gpio_cs) {
 			rc = -ENOMEM;
 			goto err_alloc_gpio;
@@ -520,6 +517,7 @@ static void mpc52xx_spi_remove(struct platform_device *op)
 	struct mpc52xx_spi *ms = spi_controller_get_devdata(host);
 	int i;
 
+	cancel_work_sync(&ms->work);
 	free_irq(ms->irq0, ms);
 	free_irq(ms->irq1, ms);
 
@@ -544,6 +542,6 @@ static struct platform_driver mpc52xx_spi_of_driver = {
 		.of_match_table = mpc52xx_spi_match,
 	},
 	.probe = mpc52xx_spi_probe,
-	.remove_new = mpc52xx_spi_remove,
+	.remove = mpc52xx_spi_remove,
 };
 module_platform_driver(mpc52xx_spi_of_driver);

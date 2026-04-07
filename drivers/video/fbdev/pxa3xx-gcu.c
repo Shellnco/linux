@@ -530,7 +530,7 @@ pxa3xx_gcu_add_buffer(struct device *dev,
 {
 	struct pxa3xx_gcu_batch *buffer;
 
-	buffer = kzalloc(sizeof(struct pxa3xx_gcu_batch), GFP_KERNEL);
+	buffer = kzalloc_obj(struct pxa3xx_gcu_batch);
 	if (!buffer)
 		return -ENOMEM;
 
@@ -696,10 +696,10 @@ MODULE_DEVICE_TABLE(of, pxa3xx_gcu_of_match);
 #endif
 
 static struct platform_driver pxa3xx_gcu_driver = {
-	.probe	  = pxa3xx_gcu_probe,
-	.remove_new	 = pxa3xx_gcu_remove,
-	.driver	 = {
-		.name   = DRV_NAME,
+	.probe = pxa3xx_gcu_probe,
+	.remove = pxa3xx_gcu_remove,
+	.driver = {
+		.name = DRV_NAME,
 		.of_match_table = of_match_ptr(pxa3xx_gcu_of_match),
 	},
 };

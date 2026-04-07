@@ -728,7 +728,7 @@ static int sprd_spi_setup_transfer(struct spi_device *sdev,
 	if (ret)
 		return ret;
 
-	/* Set tansfer speed and valid bits */
+	/* Set transfer speed and valid bits */
 	sprd_spi_set_speed(ss, t->speed_hz);
 	sprd_spi_set_transfer_bits(ss, bits_per_word);
 
@@ -936,7 +936,6 @@ static int sprd_spi_probe(struct platform_device *pdev)
 
 	ss->phy_base = res->start;
 	ss->dev = &pdev->dev;
-	sctlr->dev.of_node = pdev->dev.of_node;
 	sctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE | SPI_TX_DUAL;
 	sctlr->bus_num = pdev->id;
 	sctlr->set_cs = sprd_spi_chipselect;
@@ -982,7 +981,6 @@ static int sprd_spi_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_rpm_put;
 
-	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_autosuspend(&pdev->dev);
 
 	return 0;
@@ -1072,7 +1070,7 @@ static struct platform_driver sprd_spi_driver = {
 		.pm = &sprd_spi_pm_ops,
 	},
 	.probe = sprd_spi_probe,
-	.remove_new = sprd_spi_remove,
+	.remove = sprd_spi_remove,
 };
 
 module_platform_driver(sprd_spi_driver);

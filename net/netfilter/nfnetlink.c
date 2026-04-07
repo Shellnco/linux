@@ -325,7 +325,7 @@ static int nfnl_err_add(struct list_head *list, struct nlmsghdr *nlh, int err,
 {
 	struct nfnl_err *nfnl_err;
 
-	nfnl_err = kmalloc(sizeof(struct nfnl_err), GFP_KERNEL);
+	nfnl_err = kmalloc_obj(struct nfnl_err);
 	if (nfnl_err == NULL)
 		return -ENOMEM;
 
@@ -376,6 +376,7 @@ static void nfnetlink_rcv_batch(struct sk_buff *skb, struct nlmsghdr *nlh,
 	const struct nfnetlink_subsystem *ss;
 	const struct nfnl_callback *nc;
 	struct netlink_ext_ack extack;
+	struct nlmsghdr *onlh = nlh;
 	LIST_HEAD(err_list);
 	u32 status;
 	int err;
@@ -386,6 +387,7 @@ replay:
 	status = 0;
 replay_abort:
 	skb = netlink_skb_clone(oskb, GFP_KERNEL);
+	nlh = onlh;
 	if (!skb)
 		return netlink_ack(oskb, nlh, -ENOMEM, NULL);
 
@@ -517,7 +519,7 @@ replay_abort:
 			err = nla_parse_deprecated(cda,
 						   ss->cb[cb_id].attr_count,
 						   attr, attrlen,
-						   ss->cb[cb_id].policy, NULL);
+						   ss->cb[cb_id].policy, &extack);
 			if (err < 0)
 				goto ack;
 

@@ -9,13 +9,15 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/auxiliary_bus.h>
-#include <linux/io.h>
-#include <linux/intel_tpmi.h>
 #include <linux/intel_rapl.h>
+#include <linux/intel_tpmi.h>
+#include <linux/intel_vsec.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 
-#define TPMI_RAPL_VERSION 1
+#define TPMI_RAPL_MAJOR_VERSION 0
+#define TPMI_RAPL_MINOR_VERSION 1
 
 /* 1 header + 10 registers + 5 reserved. 8 bytes for each. */
 #define TPMI_RAPL_DOMAIN_SIZE 128
@@ -47,7 +49,7 @@ enum tpmi_rapl_register {
 
 struct tpmi_rapl_package {
 	struct rapl_if_priv priv;
-	struct intel_tpmi_plat_info *tpmi_info;
+	struct oobmsm_plat_info *tpmi_info;
 	struct rapl_package *rp;
 	void __iomem *base;
 	struct list_head node;
@@ -58,7 +60,7 @@ static DEFINE_MUTEX(tpmi_rapl_lock);
 
 static struct powercap_control_type *tpmi_control_type;
 
-static int tpmi_rapl_read_raw(int id, struct reg_action *ra)
+static int tpmi_rapl_read_raw(int id, struct reg_action *ra, bool atomic)
 {
 	if (!ra->reg.mmio)
 		return -EINVAL;
@@ -100,7 +102,7 @@ static struct tpmi_rapl_package *trp_alloc(int pkg_id)
 		}
 	}
 
-	trp = kzalloc(sizeof(*trp), GFP_KERNEL);
+	trp = kzalloc_obj(*trp);
 	if (!trp) {
 		ret = -ENOMEM;
 		goto err_del_powercap;
@@ -154,10 +156,20 @@ static int parse_one_domain(struct tpmi_rapl_package *trp, u32 offset)
 	tpmi_domain_size = tpmi_domain_header >> 16 & 0xff;
 	tpmi_domain_flags = tpmi_domain_header >> 32 & 0xffff;
 
-	if (tpmi_domain_version != TPMI_RAPL_VERSION) {
-		pr_warn(FW_BUG "Unsupported version:%d\n", tpmi_domain_version);
+	if (tpmi_domain_version == TPMI_VERSION_INVALID) {
+		pr_debug("Invalid version, other instances may be valid\n");
 		return -ENODEV;
 	}
+
+	if (TPMI_MAJOR_VERSION(tpmi_domain_version) != TPMI_RAPL_MAJOR_VERSION) {
+		pr_warn(FW_BUG "Unsupported major version:%ld\n",
+			TPMI_MAJOR_VERSION(tpmi_domain_version));
+		return -ENODEV;
+	}
+
+	if (TPMI_MINOR_VERSION(tpmi_domain_version) > TPMI_RAPL_MINOR_VERSION)
+		pr_info("Ignore: Unsupported minor version:%ld\n",
+			TPMI_MINOR_VERSION(tpmi_domain_version));
 
 	/* Domain size: in unit of 128 Bytes */
 	if (tpmi_domain_size != 1) {
@@ -181,7 +193,7 @@ static int parse_one_domain(struct tpmi_rapl_package *trp, u32 offset)
 			pr_warn(FW_BUG "System domain must support Domain Info register\n");
 			return -ENODEV;
 		}
-		tpmi_domain_info = readq(trp->base + offset + TPMI_RAPL_REG_DOMAIN_INFO);
+		tpmi_domain_info = readq(trp->base + offset + TPMI_RAPL_REG_DOMAIN_INFO * 8);
 		if (!(tpmi_domain_info & TPMI_RAPL_DOMAIN_ROOT))
 			return 0;
 		domain_type = RAPL_DOMAIN_PLATFORM;
@@ -242,7 +254,7 @@ static int intel_rapl_tpmi_probe(struct auxiliary_device *auxdev,
 				 const struct auxiliary_device_id *id)
 {
 	struct tpmi_rapl_package *trp;
-	struct intel_tpmi_plat_info *info;
+	struct oobmsm_plat_info *info;
 	struct resource *res;
 	u32 offset;
 	int ret;
@@ -336,7 +348,7 @@ static struct auxiliary_driver intel_rapl_tpmi_driver = {
 
 module_auxiliary_driver(intel_rapl_tpmi_driver)
 
-MODULE_IMPORT_NS(INTEL_TPMI);
+MODULE_IMPORT_NS("INTEL_TPMI");
 
 MODULE_DESCRIPTION("Intel RAPL TPMI Driver");
 MODULE_LICENSE("GPL");

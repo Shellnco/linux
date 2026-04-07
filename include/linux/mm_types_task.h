@@ -8,6 +8,7 @@
  * (These are defined separately to decouple sched.h from mm_types.h as much as possible.)
  */
 
+#include <linux/align.h>
 #include <linux/types.h>
 
 #include <asm/page.h>
@@ -43,6 +44,26 @@ struct page_frag {
 #endif
 };
 
+#define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(32768, ~PAGE_MASK)
+#define PAGE_FRAG_CACHE_MAX_ORDER	get_order(PAGE_FRAG_CACHE_MAX_SIZE)
+struct page_frag_cache {
+	/* encoded_page consists of the virtual address, pfmemalloc bit and
+	 * order of a page.
+	 */
+	unsigned long encoded_page;
+
+	/* we maintain a pagecount bias, so that we dont dirty cache line
+	 * containing page->_refcount every time we allocate a fragment.
+	 */
+#if (PAGE_SIZE < PAGE_FRAG_CACHE_MAX_SIZE) && (BITS_PER_LONG <= 32)
+	__u16 offset;
+	__u16 pagecnt_bias;
+#else
+	__u32 offset;
+	__u32 pagecnt_bias;
+#endif
+};
+
 /* Track pages that require TLB flushes */
 struct tlbflush_unmap_batch {
 #ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
@@ -65,6 +86,11 @@ struct tlbflush_unmap_batch {
 	 */
 	bool writable;
 #endif
+};
+
+struct lazy_mmu_state {
+	u8 enable_count;
+	u8 pause_count;
 };
 
 #endif /* _LINUX_MM_TYPES_TASK_H */
